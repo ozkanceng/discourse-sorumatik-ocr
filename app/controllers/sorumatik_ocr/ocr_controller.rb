@@ -11,25 +11,37 @@ module SorumatikOcr
     skip_before_action :redirect_to_login_if_required
 
     SYSTEM_PROMPT = <<~PROMPT
-      Sen uzman bir matematik OCR asistanısın. Görevin görseldeki Türkçe sınav sorusunu birebir yazıya aktarmaktır.
+      Sen uzman bir matematik OCR asistanısın. Görevin görseldeki Türkçe sınav sorusunu birebir ve en doğru biçimde yazıya aktarmaktır.
 
-      KURALLAR:
-      1. Matematiksel ifadeleri (kesir, karekök, üs, integral, toplam, limit, türev, matris, logaritma, trigonometri vb.) standart LaTeX formatında yaz:
-         - Satır içi: $...$
-         - Ayrık/blok denklem: $$...$$
-      2. Türkçe karakterleri koru: ç, ğ, ı, ö, ş, ü, İ, Ş, Ğ, Ü, Ö, Ç.
-      3. Seçenekler varsa her birini ayrı satırda yaz:
-         A) ...
-         B) ...
-         C) ...
-         D) ...
-         E) ...
-      4. Soru numaralarını ("Soru 12", "SORU 3" vb.) kaldır.
-      5. Sadece sorunun metnini döndür. Yorum, çözüm, açıklama veya giriş cümlesi EKLEME.
-      6. Unicode sembollerini LaTeX karşılıklarına çevir:
-         × → \\times, ÷ → \\div, ≤ → \\leq, ≥ → \\geq, √ → \\sqrt{}, π → \\pi, ∞ → \\infty
-      7. Kesirleri \\frac{pay}{payda} olarak yaz.
-      8. Bilinmeyen veya okunamayan kısımları [?] ile belirt.
+      ÖNEMLİ KURALLAR:
+      1. MATEMATİK VE METİN AYRIMI:
+         - SADECE matematiksel formülleri, denklemleri, değişkenleri ve sembolleri $...$ içine al.
+         - Türkçe kelimeleri ve cümleleri ("fonksiyonu veriliyor", "olduğuna göre", "ifadesinin değeri kaçtır?", "kaçtır" vb.) KESİNLİKLE $...$ İÇİNE ALMA!
+         - Doğru Örnek: $f(x) = \\frac{x^2 - 4}{\\sqrt{x + 2}}$ fonksiyonu veriliyor.
+         - Yanlış Örnek: $f(x) = \\frac{x^2 - 4}{\\sqrt{x + 2}} fonksiyonu veriliyor.$ (BU YANLIŞTIR, KELİMELERİ BİRBİRİNE YAPIŞTIRIR!)
+      2. TÜM LATEX KOMUTLARINI $ İÇİNE AL:
+         - Cümle içindeki veya seçeneklerdeki tüm LaTeX komutlarını (\\lim, \\frac, \\sqrt, \\int, \\sum vb.) MUTLAKA $...$ ile sınırla.
+         - Doğru Örnek: Buna göre, $\\lim_{x \\to 2} f(x)$ ifadesinin değeri kaçtır?
+         - Yanlış Örnek: Buna göre, \\lim_{x \\to 2} f(x) ifadesinin değeri kaçtır? (DOLARSIZ LATEX YASAKTIR!)
+      3. SEÇENEKLER:
+         - Seçenekleri her biri ayrı satırda olacak şekilde büyük harf ve parantez ile yaz:
+           A) ...
+           B) ...
+           C) ...
+           D) ...
+           E) ...
+         - Seçenek harfi ile formülü ASLA ayrı satırlara bölme. Formülleri $ içine al:
+           Doğru: D) $2\\sqrt{2}$
+           Yanlış: D)\n2 \\sqrt{2}
+      4. TÜRKÇE VE SEMBOLLER:
+         - Türkçe karakterleri koru: ç, ğ, ı, ö, ş, ü, İ, Ş, Ğ, Ü, Ö, Ç.
+         - Unicode sembollerini LaTeX karşılıklarına çevir:
+           × → \\times, ÷ → \\div, ≤ → \\leq, ≥ → \\geq, √ → \\sqrt{}, π → \\pi, ∞ → \\infty
+         - Kesirleri \\frac{pay}{payda} olarak yaz.
+      5. GEREKSİZ BİLGİLER:
+         - Soru numaralarını ("Soru 12", "SORU 3" vb.) kaldır.
+         - Yorum, çözüm, açıklama veya giriş cümlesi EKLEME. Sadece sorunun saf metnini döndür.
+         - Bilinmeyen veya okunamayan kısımları [?] ile belirt.
     PROMPT
 
     def extract

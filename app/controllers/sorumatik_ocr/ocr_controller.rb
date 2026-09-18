@@ -6,8 +6,9 @@ require "base64"
 
 module SorumatikOcr
   class OcrController < ::ApplicationController
-    requires_login
+    skip_before_action :check_xhr
     skip_before_action :verify_authenticity_token
+    skip_before_action :redirect_to_login_if_required
 
     SYSTEM_PROMPT = <<~PROMPT
       Sen uzman bir matematik OCR asistanısın. Görevin görseldeki Türkçe sınav sorusunu birebir yazıya aktarmaktır.
@@ -37,10 +38,14 @@ module SorumatikOcr
         return render_json_error("Gemini OCR plugin is disabled", status: 503)
       end
 
-      # 2. Rate limiting (per user)
+      # 2. Rate limiting (per user or per IP)
       limit = SiteSetting.gemini_ocr_rate_limit_per_minute.to_i
       limit = 30 if limit <= 0
-      RateLimiter.new(current_user, "sorumatik_ocr", limit, 1.minute).performed!
+      if current_user
+        RateLimiter.new(current_user, "sorumatik_ocr", limit, 1.minute).performed!
+      else
+        RateLimiter.new(nil, "sorumatik_ocr_#{request.remote_ip}", limit, 1.minute).performed!
+      end
 
       # 3. Resolve API key (from SiteSetting or ENV)
       api_key = SiteSetting.gemini_ocr_api_key.presence || ENV["GEMINI_API_KEY"]

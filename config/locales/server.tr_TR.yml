@@ -1,0 +1,10 @@
+tr_TR:
+  site_settings:
+    gemini_ocr_enabled: "Sorumatik Gemini OCR endpointini (/sorumatik/ocr) aktif et"
+    gemini_ocr_api_key: "OCR için Google Gemini API Anahtarı"
+    gemini_ocr_rate_limit_per_minute: "Kullanıcı başına dakikalık maksimum OCR istek sınırı"
+  sorumatik_ocr:
+    api_key_missing: "Gemini OCR API anahtarı sunucuda tanımlı değil."
+    image_missing: "İstekte görsel bulunamadı."
+    rate_limited: "Çok fazla OCR isteği gönderildi. Lütfen biraz bekleyin."
+    gemini_error: "Gemini OCR servisine erişilemedi."

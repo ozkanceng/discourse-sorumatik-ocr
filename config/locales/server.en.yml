@@ -1,0 +1,10 @@
+en:
+  site_settings:
+    gemini_ocr_enabled: "Enable Sorumatik Gemini OCR endpoint (/sorumatik/ocr)"
+    gemini_ocr_api_key: "Google Gemini API Key for OCR"
+    gemini_ocr_rate_limit_per_minute: "Maximum OCR requests per user per minute"
+  sorumatik_ocr:
+    api_key_missing: "Gemini OCR API key is not configured on the server."
+    image_missing: "No image file provided in request."
+    rate_limited: "Too many OCR requests. Please wait a moment."
+    gemini_error: "Gemini OCR service temporarily unavailable."

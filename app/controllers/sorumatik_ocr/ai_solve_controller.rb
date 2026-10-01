@@ -78,10 +78,41 @@ module SorumatikOcr
         end
       end
 
+      # Fallback: if no image in params, extract the upload image from first_post if available
+      if image_data_parts.empty? && first_post.present? && first_post.uploads.any?
+        first_upload = first_post.uploads.first
+        if first_upload && first_upload.filesize.to_i < 10.megabytes
+          begin
+            raw_path = Discourse.store.path_for(first_upload) rescue nil
+            img_bytes = nil
+            if raw_path && File.exist?(raw_path)
+              img_bytes = File.binread(raw_path)
+            else
+              url = Discourse.store.cdn_url(first_upload.url) rescue first_upload.url
+              url = "#{Discourse.base_url}#{url}" unless url.start_with?("http")
+              uri_img = URI.parse(url)
+              img_bytes = Net::HTTP.get(uri_img) rescue nil
+            end
+
+            if img_bytes.present?
+              mime = first_upload.extension.to_s.downcase == "png" ? "image/png" : "image/jpeg"
+              image_data_parts << {
+                inline_data: {
+                  mime_type: mime,
+                  data: Base64.strict_encode64(img_bytes)
+                }
+              }
+            end
+          rescue => img_err
+            Rails.logger.warn("[Sorumatik AI Solve] Failed to load topic image: #{img_err.message}")
+          end
+        end
+      end
+
       # 7. Model & System Instruction
       model = SiteSetting.gemini_ai_solve_model.presence || "gemini-2.5-flash"
       system_instruction_text = SiteSetting.gemini_ai_solve_system_prompt.presence ||
-        "Sen Sorumatik platformunda uzman, pedagojik formasyona sahip kıdemli bir öğretmensin. Öğrencilerin sorduğu soruları adım adım, anlaşılır, cesaretlendirici ve eğitici bir dille açıkla. Matematiksel formülleri $...$ veya $$...$$ içine al. Gereksiz giriş-çıkış lafı yapmadan doğrudan soru çözümüne odaklan."
+        "Sen Sorumatik platformunda uzman, pedagojik formasyona sahip kıdemli bir öğretmensin. Öğrencilerin sorduğu soruları adım adım, anlaşılır, cesaretlendirici ve eğitici bir dille açıkla. Matematiksel formülleri $...$ veya $$...$$ içine al. Çözümü asla yarıda kesme, son adıma ve nihai sonuca kadar (varsa sorunun doğru şıkkını açıkça belirterek, örn: **Cevap: D) 19**) eksiksiz tamamla. Gereksiz giriş-çıkış lafı yapmadan doğrudan soru çözümüne odaklan."
 
       contents_parts = []
       contents_parts.concat(image_data_parts) if image_data_parts.any?
@@ -98,7 +129,7 @@ module SorumatikOcr
         },
         generationConfig: {
           temperature: 0.3,
-          maxOutputTokens: 16384
+          maxOutputTokens: 65536
         }
       }
 
@@ -115,6 +146,7 @@ module SorumatikOcr
       # 9. Connect to Google Gemini Streaming API (SSE mode)
       uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model}:streamGenerateContent?alt=sse&key=#{api_key}")
       full_solution = +""
+      client_disconnected = false
 
       begin
         Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 120) do |http|
@@ -154,8 +186,15 @@ module SorumatikOcr
 
                     if delta_text.present?
                       full_solution << delta_text
-                      # Stream delta to client in real-time
-                      response.stream.write("data: #{ { delta: delta_text, topic_id: topic_id }.to_json }\n\n")
+                      # Stream delta to client in real-time unless client already disconnected
+                      unless client_disconnected
+                        begin
+                          response.stream.write("data: #{ { delta: delta_text, topic_id: topic_id }.to_json }\n\n")
+                        rescue => stream_err
+                          client_disconnected = true
+                          Rails.logger.warn("[Sorumatik AI Solve] Client disconnected during SSE streaming: #{stream_err.message}")
+                        end
+                      end
                     end
                   rescue JSON::ParserError
                     # Non-fatal chunk parsing error
@@ -207,15 +246,29 @@ module SorumatikOcr
           post_number: post_number,
           full_length: full_solution.length
         }
-        response.stream.write("data: #{completion_payload.to_json}\n\n")
+        unless client_disconnected
+          begin
+            response.stream.write("data: #{completion_payload.to_json}\n\n")
+          rescue => _
+          end
+        end
 
       rescue RateLimiter::LimitExceeded
-        response.stream.write("data: #{ { error: I18n.t("sorumatik_ocr.rate_limited") }.to_json }\n\n")
+        begin
+          response.stream.write("data: #{ { error: I18n.t("sorumatik_ocr.rate_limited") }.to_json }\n\n")
+        rescue => _
+        end
       rescue => e
         Rails.logger.error("[Sorumatik AI Solve] Exception: #{e.class}: #{e.message}\n#{e.backtrace.first(5).join("\n")}")
-        response.stream.write("data: #{ { error: "An error occurred during AI streaming" }.to_json }\n\n")
+        begin
+          response.stream.write("data: #{ { error: "An error occurred during AI streaming" }.to_json }\n\n")
+        rescue => _
+        end
       ensure
-        response.stream.close
+        begin
+          response.stream.close
+        rescue => _
+        end
       end
     end
   end

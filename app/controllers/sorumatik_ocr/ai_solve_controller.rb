@@ -18,15 +18,14 @@ module SorumatikOcr
         return render_json_error("AI solve feature is disabled on the server", status: 503)
       end
 
-      # 2. Authentication check - user must be logged in
-      unless current_user
-        return render_json_error(I18n.t("sorumatik_ocr.auth_required"), status: 401)
-      end
-
-      # 3. Rate limiting per user
+      # 2. Rate limiting per user or per IP
       limit = SiteSetting.gemini_ai_solve_rate_limit_per_minute.to_i
       limit = 15 if limit <= 0
-      RateLimiter.new(current_user, "sorumatik_ai_solve", limit, 1.minute).performed!
+      if current_user
+        RateLimiter.new(current_user, "sorumatik_ai_solve", limit, 1.minute).performed!
+      else
+        RateLimiter.new(nil, "sorumatik_ai_solve_#{request.remote_ip}", limit, 1.minute).performed!
+      end
 
       # 4. Resolve API key
       api_key = SiteSetting.gemini_ocr_api_key.presence || ENV["GEMINI_API_KEY"]

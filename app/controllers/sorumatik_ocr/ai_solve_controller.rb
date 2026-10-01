@@ -184,21 +184,28 @@ module SorumatikOcr
 
                     if delta_text.present?
                       full_solution << delta_text
-                      # Stream delta to client via SSE
+                      # Stream delta to client via SSE if still connected
                       unless client_disconnected
                         begin
                           response.stream.write("data: #{ { delta: delta_text, topic_id: topic_id }.to_json }\n\n")
                         rescue => stream_err
                           client_disconnected = true
-                          Rails.logger.warn("[Sorumatik AI Solve] Client disconnected during SSE streaming: #{stream_err.message}")
+                          Rails.logger.warn("[Sorumatik AI Solve] Client disconnected from SSE: #{stream_err.message}")
                         end
                       end
-                      # Also publish to MessageBus for Flutter mobile fallback
+                      # Publish cumulative snapshot to MessageBus for Flutter mobile
                       begin
+                        mb_chunk = {
+                          topic_id: topic_id,
+                          raw: full_solution,
+                          delta: delta_text,
+                          done: false
+                        }
+                        MessageBus.publish("/sorumatik/ai-solve/#{topic_id}", mb_chunk)
+                        # Also keep legacy channel for compatibility
                         MessageBus.publish(
                           "/discourse-ai/ai-bot/topic/#{topic_id}",
-                          { delta: delta_text, topic_id: topic_id, type: "delta" },
-                          user_ids: current_user ? [current_user.id] : nil
+                          { delta: delta_text, topic_id: topic_id, type: "delta" }
                         )
                       rescue => mb_err
                         Rails.logger.warn("[Sorumatik AI Solve] MessageBus publish error: #{mb_err.message}")
@@ -250,6 +257,7 @@ module SorumatikOcr
         completion_payload = {
           done: true,
           topic_id: topic_id,
+          raw: full_solution,
           post_id: post_id,
           post_number: post_number,
           full_length: full_solution.length
@@ -262,10 +270,10 @@ module SorumatikOcr
         end
         # Publish done to MessageBus for Flutter mobile
         begin
+          MessageBus.publish("/sorumatik/ai-solve/#{topic_id}", completion_payload)
           MessageBus.publish(
             "/discourse-ai/ai-bot/topic/#{topic_id}",
-            completion_payload.merge(type: "done"),
-            user_ids: current_user ? [current_user.id] : nil
+            completion_payload.merge(type: "done")
           )
         rescue => _
         end
@@ -275,10 +283,18 @@ module SorumatikOcr
           response.stream.write("data: #{ { error: I18n.t("sorumatik_ocr.rate_limited") }.to_json }\n\n")
         rescue => _
         end
+        begin
+          MessageBus.publish("/sorumatik/ai-solve/#{topic_id}", { error: I18n.t("sorumatik_ocr.rate_limited"), done: true, topic_id: topic_id })
+        rescue => _
+        end
       rescue => e
         Rails.logger.error("[Sorumatik AI Solve] Exception: #{e.class}: #{e.message}\n#{e.backtrace.first(5).join("\n")}")
         begin
           response.stream.write("data: #{ { error: "An error occurred during AI streaming" }.to_json }\n\n")
+        rescue => _
+        end
+        begin
+          MessageBus.publish("/sorumatik/ai-solve/#{topic_id}", { error: "An error occurred during AI streaming", done: true, topic_id: topic_id })
         rescue => _
         end
       ensure

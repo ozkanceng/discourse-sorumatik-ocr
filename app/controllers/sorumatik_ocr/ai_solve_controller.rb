@@ -133,12 +133,10 @@ module SorumatikOcr
         }
       }
 
-      # 8. Setup SSE Response Headers (Bypass proxy buffering and avoid Content-Length termination)
-      response.headers["Content-Type"] = "text/event-stream; charset=utf-8"
-      response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+      # 8. Setup SSE Response Headers (Bypass proxy buffering without violating HTTP/2 specs)
+      response.headers["Content-Type"] = "text/event-stream"
+      response.headers["Cache-Control"] = "no-cache"
       response.headers["X-Accel-Buffering"] = "no"
-      response.headers["Transfer-Encoding"] = "chunked"
-      response.headers.delete("Content-Length")
 
       # Immediately flush an initial comment to establish the streaming connection
       response.stream.write(": stream-open\n\n")

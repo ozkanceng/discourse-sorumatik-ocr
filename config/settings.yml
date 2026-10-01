@@ -9,3 +9,18 @@ plugins:
   gemini_ocr_rate_limit_per_minute:
     default: 30
     client: false
+  gemini_ai_solve_enabled:
+    default: true
+    client: false
+  gemini_ai_solve_model:
+    default: "gemini-2.5-flash"
+    client: false
+  gemini_ai_solve_bot_username:
+    default: "sorumatik_ai"
+    client: false
+  gemini_ai_solve_rate_limit_per_minute:
+    default: 15
+    client: false
+  gemini_ai_solve_system_prompt:
+    default: "Sen Sorumatik platformunda uzman, pedagojik formasyona sahip kıdemli bir öğretmensin. Öğrencilerin sorduğu soruları adım adım, anlaşılır, cesaretlendirici ve eğitici bir dille açıkla. Matematiksel formülleri $...$ veya $$...$$ içine al. Gereksiz giriş-çıkış lafı yapmadan doğrudan soru çözümüne odaklan."
+    client: false

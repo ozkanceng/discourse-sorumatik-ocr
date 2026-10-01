@@ -19,9 +19,12 @@ after_initialize do
   end
 
   require_relative "app/controllers/sorumatik_ocr/ocr_controller"
+  require_relative "app/controllers/sorumatik_ocr/ai_solve_controller"
 
   SorumatikOcr::Engine.routes.draw do
     post "/ocr" => "ocr#extract"
+    post "/stream-solve" => "ai_solve#stream"
+    post "/ai-solve" => "ai_solve#stream"
   end
 
   Discourse::Application.routes.append do

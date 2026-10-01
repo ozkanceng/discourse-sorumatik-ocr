@@ -91,10 +91,48 @@ module SorumatikOcr
                   end
 
       base64_data = Base64.strict_encode64(image_bytes)
-      lang = (params[:lang] || "tr").to_s.downcase
-      prompt_text = lang == "tr" ? "Bu görseldeki sınav/matematik sorusunu metin ve LaTeX formatında çıkar." : "Extract the exam question in text and LaTeX."
+      mode = (params[:type] || params[:mode] || "question").to_s.downcase
+      custom_prompt = params[:prompt].presence
+      branch = params[:branch].presence
 
-      # 5. Build Google Gemini 2.5 Flash Lite payload with thinkingBudget: 0
+      if mode == "timetable"
+        default_timetable_prompt = <<~TPROMPT
+          Sen bir MEB (Milli Eğitim Bakanlığı) haftalık ders programı çizelgesi çözümleme uzmanısın.
+          Görseldeki haftalık öğretmen veya sınıf ders dağıtım tablosunu satır satır ve sütun sütun analiz et.
+
+          Kurallar:
+          1. Günler: Pazartesi=1, Salı=2, Çarşamba=3, Perşembe=4, Cuma=5.
+          2. Ders Saatleri: 1, 2, 3, 4, 5, 6, 7, 8 ... sıralı periyot numaralarıdır.
+          3. Sınıf adı (örn: "12-A", "9/B") ve ders adını (örn: "Matematik", "Fizik") çıkar.
+          #{branch ? "4. Öğretmenin branşı \"#{branch}\" olarak bilinmektedir. Ders adı yazmayan hücrelerde bunu kullan." : ""}
+          5. Eğer zil saatleri varsa "08:30" - "09:10" olarak startTime ve endTime ekle.
+          6. SADECE saf geçerli bir JSON dizisi (array) döndür:
+          [{"dayOfWeek": 1, "periodNumber": 1, "className": "12-A", "subjectName": "Matematik", "startTime": "08:30", "endTime": "09:10"}]
+        TPROMPT
+
+        prompt_text = custom_prompt || default_timetable_prompt
+        generation_cfg = {
+          temperature: 0.1,
+          maxOutputTokens: 4096,
+          responseMimeType: "application/json"
+        }
+        system_instruction = nil
+      else
+        lang = (params[:lang] || "tr").to_s.downcase
+        prompt_text = custom_prompt || (lang == "tr" ? "Bu görseldeki sınav/matematik sorusunu metin ve LaTeX formatında çıkar." : "Extract the exam question in text and LaTeX.")
+        generation_cfg = {
+          temperature: 0.1,
+          maxOutputTokens: 2048,
+          thinkingConfig: {
+            thinkingBudget: 0
+          }
+        }
+        system_instruction = {
+          parts: [{ text: SYSTEM_PROMPT }]
+        }
+      end
+
+      # 5. Build Google Gemini 2.5 Flash Lite payload
       uri = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=#{api_key}")
 
       payload = {
@@ -111,24 +149,14 @@ module SorumatikOcr
             ]
           }
         ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 2048,
-          thinkingConfig: {
-            thinkingBudget: 0
-          }
-        },
-        systemInstruction: {
-          parts: [
-            { text: SYSTEM_PROMPT }
-          ]
-        }
+        generationConfig: generation_cfg
       }
+      payload[:systemInstruction] = system_instruction if system_instruction
 
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
       http.open_timeout = 5
-      http.read_timeout = 20
+      http.read_timeout = 25
 
       req = Net::HTTP::Post.new(uri.request_uri, { "Content-Type" => "application/json" })
       req.body = payload.to_json
@@ -153,17 +181,28 @@ module SorumatikOcr
         return render_json_error("Gemini empty response", status: 502)
       end
 
-      # 7. Return standard format expected by mobile client
-      render json: {
-        success: true,
-        engine: "gemini_flash_lite",
-        question_latex: raw_text,
-        raw_text: raw_text,
-        title: "Soru",
-        confidence: 95,
-        needs_review: false,
-        duration_ms: duration_ms
-      }
+      # 7. Return format based on mode
+      if mode == "timetable"
+        clean_json = raw_text.gsub(/```json\s*/i, "").gsub(/```/, "").strip
+        begin
+          timetable_data = JSON.parse(clean_json)
+          render json: timetable_data
+        rescue JSON::ParserError => je
+          Rails.logger.error("[Sorumatik OCR] Timetable JSON parse error: #{je.message}")
+          render json: { error: "Failed to parse timetable JSON", raw: raw_text }, status: 502
+        end
+      else
+        render json: {
+          success: true,
+          engine: "gemini_flash_lite",
+          question_latex: raw_text,
+          raw_text: raw_text,
+          title: "Soru",
+          confidence: 95,
+          needs_review: false,
+          duration_ms: duration_ms
+        }
+      end
     rescue RateLimiter::LimitExceeded
       render_json_error(I18n.t("sorumatik_ocr.rate_limited"), status: 429)
     rescue => e

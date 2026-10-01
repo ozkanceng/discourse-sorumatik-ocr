@@ -184,7 +184,7 @@ module SorumatikOcr
 
                     if delta_text.present?
                       full_solution << delta_text
-                      # Stream delta to client in real-time unless client already disconnected
+                      # Stream delta to client via SSE
                       unless client_disconnected
                         begin
                           response.stream.write("data: #{ { delta: delta_text, topic_id: topic_id }.to_json }\n\n")
@@ -192,6 +192,16 @@ module SorumatikOcr
                           client_disconnected = true
                           Rails.logger.warn("[Sorumatik AI Solve] Client disconnected during SSE streaming: #{stream_err.message}")
                         end
+                      end
+                      # Also publish to MessageBus for Flutter mobile fallback
+                      begin
+                        MessageBus.publish(
+                          "/discourse-ai/ai-bot/topic/#{topic_id}",
+                          { delta: delta_text, topic_id: topic_id, type: "delta" },
+                          user_ids: current_user ? [current_user.id] : nil
+                        )
+                      rescue => mb_err
+                        Rails.logger.warn("[Sorumatik AI Solve] MessageBus publish error: #{mb_err.message}")
                       end
                     end
                   rescue JSON::ParserError
@@ -249,6 +259,15 @@ module SorumatikOcr
             response.stream.write("data: #{completion_payload.to_json}\n\n")
           rescue => _
           end
+        end
+        # Publish done to MessageBus for Flutter mobile
+        begin
+          MessageBus.publish(
+            "/discourse-ai/ai-bot/topic/#{topic_id}",
+            completion_payload.merge(type: "done"),
+            user_ids: current_user ? [current_user.id] : nil
+          )
+        rescue => _
         end
 
       rescue RateLimiter::LimitExceeded

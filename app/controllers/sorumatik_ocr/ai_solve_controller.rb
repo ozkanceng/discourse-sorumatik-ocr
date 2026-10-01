@@ -141,7 +141,7 @@ module SorumatikOcr
                     candidates = parsed_chunk["candidates"] || []
                     first_cand = candidates.first || {}
                     parts = first_cand.dig("content", "parts") || []
-                    delta_text = parts.map { |p| p["text"] }.compact.join("")
+                    delta_text = parts.reject { |p| p["thought"] == true }.map { |p| p["text"] }.compact.join("")
 
                     if delta_text.present?
                       full_solution << delta_text

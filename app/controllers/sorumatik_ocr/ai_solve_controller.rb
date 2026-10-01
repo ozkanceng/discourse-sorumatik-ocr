@@ -98,21 +98,26 @@ module SorumatikOcr
         },
         generationConfig: {
           temperature: 0.3,
-          maxOutputTokens: 4096
+          maxOutputTokens: 16384
         }
       }
 
-      # 8. Setup SSE Response Headers
-      response.headers["Content-Type"] = "text/event-stream"
-      response.headers["Cache-Control"] = "no-cache"
+      # 8. Setup SSE Response Headers (Bypass proxy buffering and avoid Content-Length termination)
+      response.headers["Content-Type"] = "text/event-stream; charset=utf-8"
+      response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
       response.headers["X-Accel-Buffering"] = "no"
+      response.headers["Transfer-Encoding"] = "chunked"
+      response.headers.delete("Content-Length")
+
+      # Immediately flush an initial comment to establish the streaming connection
+      response.stream.write(": stream-open\n\n")
 
       # 9. Connect to Google Gemini Streaming API (SSE mode)
       uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model}:streamGenerateContent?alt=sse&key=#{api_key}")
       full_solution = +""
 
       begin
-        Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 5, read_timeout: 60) do |http|
+        Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 120) do |http|
           req = Net::HTTP::Post.new(uri.request_uri)
           req["Content-Type"] = "application/json"
           req.body = payload.to_json
@@ -140,6 +145,10 @@ module SorumatikOcr
                     parsed_chunk = JSON.parse(raw_json)
                     candidates = parsed_chunk["candidates"] || []
                     first_cand = candidates.first || {}
+                    finish_reason = first_cand["finishReason"]
+                    if finish_reason.present? && finish_reason != "STOP"
+                      Rails.logger.warn("[Sorumatik AI Solve] Gemini finished with reason: #{finish_reason}")
+                    end
                     parts = first_cand.dig("content", "parts") || []
                     delta_text = parts.reject { |p| p["thought"] == true }.map { |p| p["text"] }.compact.join("")
 

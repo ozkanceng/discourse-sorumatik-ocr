@@ -174,6 +174,16 @@ module SorumatikOcr
             if created_post
               post_id = created_post.id
               post_number = created_post.post_number
+              begin
+                topic = created_post.topic
+                if topic
+                  topic.custom_fields["ai_solve_handled"] = "true"
+                  topic.save_custom_fields(true)
+                  DiscourseTagging.tag_topic_by_names(topic, Discourse.system_user.guardian, ["soru-cozumu"], append: true) if defined?(DiscourseTagging)
+                end
+              rescue => tag_err
+                Rails.logger.warn("[Sorumatik AI Solve] Failed to tag topic: #{tag_err.message}")
+              end
             end
           rescue => post_err
             Rails.logger.error("[Sorumatik AI Solve] Failed to create post: #{post_err.class}: #{post_err.message}")

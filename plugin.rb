@@ -30,4 +30,26 @@ after_initialize do
   Discourse::Application.routes.append do
     mount ::SorumatikOcr::Engine, at: "/sorumatik"
   end
+
+  # Mobilden sorulan (soru-cozumu etiketli) konularda web otomasyon botunun (@sorumatik_uzman_bot) çift cevap vermesini engelle
+  validate(:post, :validate_sorumatik_automation_suppression) do
+    suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
+    return if user.blank? || !user.username.to_s.casecmp?(suppress_bot)
+
+    if topic.present? && (topic.tags.exists?(name: "soru-cozumu") || topic.custom_fields["ai_solve_handled"].present?)
+      Rails.logger.info("[Sorumatik AI] Suppressing automation bot #{suppress_bot} for topic ##{topic_id} (tagged: soru-cozumu)")
+      errors.add(:base, "Bu konu mobil uygulama çözümü içerdiği için otomasyon botu yanıtı engellendi.")
+    end
+  end
+
+  on(:before_create_post) do |post|
+    suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
+    if post.user.present? && post.user.username.to_s.casecmp?(suppress_bot)
+      t = post.topic
+      if t.present? && (t.tags.exists?(name: "soru-cozumu") || t.custom_fields["ai_solve_handled"].present?)
+        Rails.logger.info("[Sorumatik AI] Halting automation bot #{suppress_bot} post creation on topic ##{t.id}")
+        throw(:abort)
+      end
+    end
+  end
 end

@@ -8,6 +8,7 @@ en:
     gemini_ai_solve_bot_username: "Bot username that will author the solution post in forum (e.g., sorumatik_ai)"
     gemini_ai_solve_rate_limit_per_minute: "Maximum AI question solve requests per user per minute"
     gemini_ai_solve_system_prompt: "System prompt for AI question solver"
+    gemini_ai_suppress_automation_bot_username: "Discourse automation bot username to suppress on mobile topics (default: sorumatik_uzman_bot)"
   sorumatik_ocr:
     api_key_missing: "Gemini OCR API key is not configured on the server."
     image_missing: "No image file provided in request."

@@ -147,7 +147,9 @@ module SorumatikOcr
           raise "Answer access revoked" unless source.deleted_at.nil? && Guardian.new(source.user).can_see?(source.topic)
           bot = User.find_by_username(SiteSetting.gemini_ai_solve_bot_username)
           raise "Configured answer bot is missing" unless bot
-          creator = PostCreator.new(bot, topic_id: @generation.topic_id, raw: @generation.raw,
+          topic = Topic.find_by(id: @generation.topic_id)
+          raise "Topic is missing" unless topic
+          creator = PostCreator.new(bot, topic_id: topic.id, raw: @generation.raw,
                                     reply_to_post_number: source.post_number, skip_validations: true,
                                     skip_jobs: true, skip_events: true,
                                     custom_fields: { "sorumatik_generation_id" => @generation.generation_id })

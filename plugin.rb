@@ -98,10 +98,18 @@ after_initialize do
     mount ::SorumatikOcr::Engine, at: "/sorumatik"
   end
 
-  # Mobilden sorulan (soru-cozumu etiketli) konularda web otomasyon botunun (@sorumatik_uzman_bot) çift cevap vermesini engelle
+  # Mobilden sorulan (soru-cozumu etiketli) konularda web otomasyon botunun (@sorumatik_uzman_bot veya @sorumatik_ai) çift cevap vermesini ve botların konu açmasını engelle
   validate(:post, :validate_sorumatik_automation_suppression) do
     suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
     bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
+    is_bot_user = user.present? && (user.username.to_s.casecmp?(bot_username) || user.username.to_s.casecmp?(suppress_bot))
+
+    # Botlar hiçbir zaman forumda birinci post (yeni konu açılışı) olamaz
+    if is_bot_user && (post_number == 1 || is_first_post?)
+      Rails.logger.warn("[Sorumatik AI] Blocked bot #{user.username} from opening a new topic")
+      errors.add(:base, "Bot kullanıcıları doğrudan konu açamaz.")
+      next
+    end
 
     if user.present? && user.username.to_s.casecmp?(suppress_bot)
       if topic.present? && (topic.tags.exists?(name: "soru-cozumu") || topic.custom_fields["ai_solve_handled"].present?)
@@ -112,7 +120,7 @@ after_initialize do
 
     # Yapay zeka aracı PM'lerinde (ai_module_handled) Discourse AI botunun mükerrer 2. cevap eklemesini engelle
     if topic.present? && topic.custom_fields["ai_module_handled"] == "true"
-      if user.present? && (user.username.to_s.casecmp?(bot_username) || user.username.to_s.casecmp?(suppress_bot))
+      if is_bot_user
         if topic.posts.where(user_id: user.id).where.not(id: id).exists?
           Rails.logger.info("[Sorumatik AI] Suppressing duplicate bot reply on study PM ##{topic.id}")
           errors.add(:base, "Bu çalışma için zaten bir yanıt mevcut.")
@@ -125,6 +133,13 @@ after_initialize do
     suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
     bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
     t = post.topic
+    is_bot = post.user.present? && (post.user.username.to_s.casecmp?(bot_username) || post.user.username.to_s.casecmp?(suppress_bot))
+
+    # Botlar yeni konu açamaz
+    if is_bot && (post.is_first_post? || (t.present? && t.posts_count.to_i == 0))
+      Rails.logger.warn("[Sorumatik AI] Halting bot #{post.user.username} from creating topic ##{t&.id}")
+      throw(:abort)
+    end
 
     if post.user.present? && post.user.username.to_s.casecmp?(suppress_bot)
       if t.present? && (t.tags.exists?(name: "soru-cozumu") || t.custom_fields["ai_solve_handled"].present?)
@@ -135,7 +150,7 @@ after_initialize do
 
     # Yapay zeka aracı PM'lerinde botun ikinci kez tetiklenmesini engelle
     if t.present? && t.custom_fields["ai_module_handled"] == "true"
-      if post.user.present? && (post.user.username.to_s.casecmp?(bot_username) || post.user.username.to_s.casecmp?(suppress_bot))
+      if is_bot
         existing_bot_posts = t.posts.where(user_id: post.user_id).count
         if existing_bot_posts >= 1 && post.id.nil?
           Rails.logger.info("[Sorumatik AI] Halting duplicate bot reply (#{post.user.username}) on study PM ##{t.id}")

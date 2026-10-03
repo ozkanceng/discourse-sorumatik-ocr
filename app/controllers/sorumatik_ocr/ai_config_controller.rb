@@ -64,7 +64,7 @@ module SorumatikOcr
         title: title,
         raw: prompt,
         archetype: "private_message",
-        target_recipients: bot_username,
+        target_usernames: bot_username,
         skip_validations: true,
         topic_opts: { custom_fields: { "ai_module_handled" => "true" } },
         custom_fields: { "ai_module_handled" => "true" }

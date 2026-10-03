@@ -8,23 +8,25 @@ module SorumatikOcr
 
     # GET /sorumatik/ai-config
     def config
-      # Rate limit config checks per IP or user
-      limit = 60
-      if current_user
-        RateLimiter.new(current_user, "sorumatik_ai_config", limit, 1.minute).performed!
-      else
-        RateLimiter.new(nil, "sorumatik_ai_config_#{request.remote_ip}", limit, 1.minute).performed!
+      begin
+        limit = 60
+        if current_user
+          RateLimiter.new(current_user, "sorumatik_ai_config", limit, 1.minute).performed!
+        elsif request.remote_ip.present?
+          RateLimiter.new(nil, "sorumatik_ai_config_#{request.remote_ip}", limit, 1.minute, global: true).performed!
+        end
+      rescue RateLimiter::LimitExceeded
+        return render json: { success: false, error: "Rate limit exceeded" }, status: 429
+      rescue => rl_err
+        Rails.logger.warn("[Sorumatik AI Config] RateLimiter notice: #{rl_err.message}")
       end
 
-      api_key = SiteSetting.gemini_ocr_api_key.presence || ENV["GEMINI_API_KEY"] || ""
-      model = SiteSetting.gemini_ai_tools_model.presence || "gemini-2.5-flash"
-      ocr_model = SiteSetting.gemini_ocr_model.presence || "gemini-2.5-flash-lite"
-      document_quiz_model = if SiteSetting.respond_to?(:gemini_document_quiz_model)
-                              SiteSetting.gemini_document_quiz_model.presence || model
-                            else
-                              model
-                            end
-      enabled = SiteSetting.gemini_ocr_enabled && SiteSetting.gemini_ai_tools_enabled
+      api_key = (SiteSetting.respond_to?(:gemini_ocr_api_key) && SiteSetting.gemini_ocr_api_key.presence) || ENV["GEMINI_API_KEY"] || ""
+      model = (SiteSetting.respond_to?(:gemini_ai_tools_model) && SiteSetting.gemini_ai_tools_model.presence) || "gemini-2.5-flash"
+      ocr_model = (SiteSetting.respond_to?(:gemini_ocr_model) && SiteSetting.gemini_ocr_model.presence) || "gemini-2.5-flash-lite"
+      document_quiz_model = (SiteSetting.respond_to?(:gemini_document_quiz_model) && SiteSetting.gemini_document_quiz_model.presence) || model
+      enabled = (SiteSetting.respond_to?(:gemini_ocr_enabled) && SiteSetting.gemini_ocr_enabled) &&
+                (SiteSetting.respond_to?(:gemini_ai_tools_enabled) && SiteSetting.gemini_ai_tools_enabled)
 
       is_authorized = current_user.present? ||
                       request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4" ||
@@ -32,14 +34,12 @@ module SorumatikOcr
 
       render json: {
         success: true,
-        enabled: enabled,
+        enabled: !!enabled,
         model: model,
         ocr_model: ocr_model,
         document_quiz_model: document_quiz_model,
         api_key: is_authorized ? api_key : ""
       }
-    rescue RateLimiter::LimitExceeded
-      render json: { success: false, error: "Rate limit exceeded" }, status: 429
     rescue => err
       Rails.logger.error("[Sorumatik AI Config] Error: #{err.message}")
       render json: { success: false, error: err.message }, status: 500

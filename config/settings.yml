@@ -36,6 +36,9 @@ plugins:
   gemini_ai_tools_model:
     default: "gemini-2.5-flash"
     client: false
+  gemini_document_quiz_model:
+    default: "gemini-2.5-flash"
+    client: false
   sorumatik_ai_generation_streaming_enabled:
     default: true
     client: false

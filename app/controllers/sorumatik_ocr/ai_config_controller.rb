@@ -19,6 +19,11 @@ module SorumatikOcr
       api_key = SiteSetting.gemini_ocr_api_key.presence || ENV["GEMINI_API_KEY"] || ""
       model = SiteSetting.gemini_ai_tools_model.presence || "gemini-2.5-flash"
       ocr_model = SiteSetting.gemini_ocr_model.presence || "gemini-2.5-flash-lite"
+      document_quiz_model = if SiteSetting.respond_to?(:gemini_document_quiz_model)
+                              SiteSetting.gemini_document_quiz_model.presence || model
+                            else
+                              model
+                            end
       enabled = SiteSetting.gemini_ocr_enabled && SiteSetting.gemini_ai_tools_enabled
 
       is_authorized = current_user.present? ||
@@ -30,13 +35,14 @@ module SorumatikOcr
         enabled: enabled,
         model: model,
         ocr_model: ocr_model,
+        document_quiz_model: document_quiz_model,
         api_key: is_authorized ? api_key : ""
       }
     rescue RateLimiter::LimitExceeded
-      render_json_error(I18n.t("sorumatik_ocr.rate_limited"), status: 429)
+      render json: { success: false, error: "Rate limit exceeded" }, status: 429
     rescue => err
       Rails.logger.error("[Sorumatik AI Config] Error: #{err.message}")
-      render_json_error("Internal server error", status: 500)
+      render json: { success: false, error: err.message }, status: 500
     end
 
     # POST /sorumatik/save-study

@@ -14,6 +14,7 @@ tr_TR:
     gemini_ai_suppress_automation_bot_username: "Mobil sorularda engellenecek Discourse otomasyon botu kullanıcı adı (varsayılan: sorumatik_uzman_bot)"
     gemini_ai_tools_enabled: "Sorumatik yapay zeka araçları (test, özet vb.) yüksek hızlı uç mimarisini aktif et"
     gemini_ai_tools_model: "Yapay zeka araçları için kullanılacak Gemini modeli (varsayılan: gemini-2.5-flash)"
+    gemini_document_quiz_model: "Belgeden/PDF'ten test oluşturma modülü için kullanılacak Gemini modeli (varsayılan: gemini-2.5-flash)"
   sorumatik_ocr:
     api_key_missing: "Gemini OCR API anahtarı sunucuda tanımlı değil."
     image_missing: "İstekte görsel bulunamadı."

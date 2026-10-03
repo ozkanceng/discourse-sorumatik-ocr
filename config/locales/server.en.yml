@@ -1,14 +1,19 @@
 en:
   site_settings:
+    sorumatik_ai_generation_streaming_enabled: "Deliver durable AI generations through MessageBus (off uses status polling)."
+    sorumatik_ai_generation_streaming_percent: "Percentage of users receiving live AI generation events."
     gemini_ocr_enabled: "Enable Sorumatik Gemini OCR endpoint (/sorumatik/ocr)"
     gemini_ocr_api_key: "Google Gemini API Key for OCR"
     gemini_ocr_rate_limit_per_minute: "Maximum OCR requests per user per minute"
+    gemini_ocr_model: "Google Gemini model to use for OCR question recognition (e.g., gemini-2.5-flash-lite or gemini-2.5-flash)"
     gemini_ai_solve_enabled: "Enable Sorumatik direct AI streaming question solve endpoint (/sorumatik/stream-solve)"
     gemini_ai_solve_model: "Google Gemini model to use for AI question solving (e.g., gemini-2.5-flash)"
     gemini_ai_solve_bot_username: "Bot username that will author the solution post in forum (e.g., sorumatik_ai)"
     gemini_ai_solve_rate_limit_per_minute: "Maximum AI question solve requests per user per minute"
     gemini_ai_solve_system_prompt: "System prompt for AI question solver"
     gemini_ai_suppress_automation_bot_username: "Discourse automation bot username to suppress on mobile topics (default: sorumatik_uzman_bot)"
+    gemini_ai_tools_enabled: "Enable Sorumatik high-speed edge architecture for AI study tools (quiz, summary, etc.)"
+    gemini_ai_tools_model: "Google Gemini model to use for AI tools (default: gemini-2.5-flash)"
   sorumatik_ocr:
     api_key_missing: "Gemini OCR API key is not configured on the server."
     image_missing: "No image file provided in request."

@@ -20,11 +20,79 @@ after_initialize do
 
   require_relative "app/controllers/sorumatik_ocr/ocr_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_solve_controller"
+  require_relative "app/controllers/sorumatik_ocr/ai_config_controller"
+  require_relative "app/models/sorumatik_ocr/ai_generation"
+  require_relative "lib/sorumatik_ocr/gemini_answer_stream"
+  require_relative "lib/sorumatik_ocr/answer_generation"
+  require_relative "app/controllers/sorumatik_ocr/ai_generations_controller"
+  require_dependency "jobs/base"
+  require_dependency "jobs/scheduled"
+  require_relative "app/jobs/regular/sorumatik_generate_answer"
+  require_relative "app/jobs/scheduled/sorumatik_recover_answers"
+
+  begin
+    require_dependency "discourse_ai/ai_bot/playground"
+    require_relative "lib/sorumatik_ocr/managed_ai_reply"
+    DiscourseAi::AiBot::Playground.prepend(SorumatikOcr::ManagedAiReply)
+  rescue LoadError, NameError => e
+    Rails.logger.warn("sorumatik_ai native_adapter_unavailable error=#{e.class}")
+  end
+
+  # Recheck visibility at delivery time, including replay of the bus backlog.
+  MessageBus.register_client_message_filter("/sorumatik/ai-answer/") do |message|
+    data = message.data
+    if data.is_a?(Hash) && (data["protocol"] || data[:protocol]) == 2
+      ActiveRecord::Base.connection_pool.with_connection do
+        id = data["generation_id"] || data[:generation_id]
+        generation = SorumatikOcr::AiGeneration.find_by(generation_id: id)
+        source = generation&.source_post
+        source && source.deleted_at.nil? && source.user &&
+          Guardian.new(source.user).can_see?(source.topic)
+      end
+    else
+      true # Existing protocol-1 publishers retain their own audience rules.
+    end
+  end
+
+  on(:post_created) do |post, _opts|
+    if SorumatikOcr::AnswerGeneration.managed_source?(post)
+      begin
+        SorumatikOcr::AnswerGeneration.start!(post)
+      rescue StandardError => e
+        Rails.logger.warn("sorumatik_ai enqueue_failed source_post_id=#{post.id} error=#{e.class}")
+      end
+    end
+  end
+
+  add_to_serializer(:topic_view, :sorumatik_pending_generation) do
+    if scope.user
+      generation = SorumatikOcr::AiGeneration.where(topic_id: object.topic.id, user_id: scope.user.id)
+        .order(created_at: :desc, id: :desc).first
+      # An earlier failed answer must not reappear over a newer completed one.
+      source = generation&.source_post
+      if generation && generation.state != "completed" && source && source.deleted_at.nil? && scope.can_see?(source)
+        { generation_id: generation.generation_id, source_post_id: generation.source_post_id }
+      end
+    end
+  end
+
+  # Raw is the shared renderer's source on both topic loads and single-post reads.
+  add_to_serializer(:post, :sorumatik_ai_raw, include_condition: -> {
+    object.user&.username == SiteSetting.gemini_ai_solve_bot_username
+  }) { object.raw }
+  add_to_serializer(:post, :sorumatik_generation_id, include_condition: -> {
+    object.custom_fields["sorumatik_generation_id"].present?
+  }) { object.custom_fields["sorumatik_generation_id"] }
 
   SorumatikOcr::Engine.routes.draw do
     post "/ocr" => "ocr#extract"
     post "/stream-solve" => "ai_solve#stream"
     post "/ai-solve" => "ai_solve#stream"
+    get  "/ai-config" => "ai_config#config"
+    post "/save-study" => "ai_config#save_study"
+    post "/save-solution" => "ai_config#save_solution"
+    post "/ai-generations" => "ai_generations#create"
+    get "/ai-generations/:id" => "ai_generations#show"
   end
 
   Discourse::Application.routes.append do
@@ -34,21 +102,46 @@ after_initialize do
   # Mobilden sorulan (soru-cozumu etiketli) konularda web otomasyon botunun (@sorumatik_uzman_bot) çift cevap vermesini engelle
   validate(:post, :validate_sorumatik_automation_suppression) do
     suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
-    return if user.blank? || !user.username.to_s.casecmp?(suppress_bot)
+    bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
 
-    if topic.present? && (topic.tags.exists?(name: "soru-cozumu") || topic.custom_fields["ai_solve_handled"].present?)
-      Rails.logger.info("[Sorumatik AI] Suppressing automation bot #{suppress_bot} for topic ##{topic_id} (tagged: soru-cozumu)")
-      errors.add(:base, "Bu konu mobil uygulama çözümü içerdiği için otomasyon botu yanıtı engellendi.")
+    if user.present? && user.username.to_s.casecmp?(suppress_bot)
+      if topic.present? && (topic.tags.exists?(name: "soru-cozumu") || topic.custom_fields["ai_solve_handled"].present?)
+        Rails.logger.info("[Sorumatik AI] Suppressing automation bot #{suppress_bot} for topic ##{topic_id} (tagged: soru-cozumu)")
+        errors.add(:base, "Bu konu mobil uygulama çözümü içerdiği için otomasyon botu yanıtı engellendi.")
+      end
+    end
+
+    # Yapay zeka aracı PM'lerinde (ai_module_handled) Discourse AI botunun mükerrer 2. cevap eklemesini engelle
+    if topic.present? && topic.custom_fields["ai_module_handled"] == "true"
+      if user.present? && (user.username.to_s.casecmp?(bot_username) || user.username.to_s.casecmp?(suppress_bot))
+        if topic.posts.where(user_id: user.id).where.not(id: id).exists?
+          Rails.logger.info("[Sorumatik AI] Suppressing duplicate bot reply on study PM ##{topic.id}")
+          errors.add(:base, "Bu çalışma için zaten bir yanıt mevcut.")
+        end
+      end
     end
   end
 
   on(:before_create_post) do |post|
     suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
+    bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
+    t = post.topic
+
     if post.user.present? && post.user.username.to_s.casecmp?(suppress_bot)
-      t = post.topic
       if t.present? && (t.tags.exists?(name: "soru-cozumu") || t.custom_fields["ai_solve_handled"].present?)
         Rails.logger.info("[Sorumatik AI] Halting automation bot #{suppress_bot} post creation on topic ##{t.id}")
         throw(:abort)
+      end
+    end
+
+    # Yapay zeka aracı PM'lerinde botun ikinci kez tetiklenmesini engelle
+    if t.present? && t.custom_fields["ai_module_handled"] == "true"
+      if post.user.present? && (post.user.username.to_s.casecmp?(bot_username) || post.user.username.to_s.casecmp?(suppress_bot))
+        existing_bot_posts = t.posts.where(user_id: post.user_id).count
+        if existing_bot_posts >= 1 && post.id.nil?
+          Rails.logger.info("[Sorumatik AI] Halting duplicate bot reply (#{post.user.username}) on study PM ##{t.id}")
+          throw(:abort)
+        end
       end
     end
   end

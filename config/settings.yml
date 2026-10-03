@@ -9,6 +9,9 @@ plugins:
   gemini_ocr_rate_limit_per_minute:
     default: 30
     client: false
+  gemini_ocr_model:
+    default: "gemini-2.5-flash-lite"
+    client: false
   gemini_ai_solve_enabled:
     default: true
     client: false
@@ -26,4 +29,18 @@ plugins:
     client: false
   gemini_ai_suppress_automation_bot_username:
     default: "sorumatik_uzman_bot"
+    client: false
+  gemini_ai_tools_enabled:
+    default: true
+    client: false
+  gemini_ai_tools_model:
+    default: "gemini-2.5-flash"
+    client: false
+  sorumatik_ai_generation_streaming_enabled:
+    default: true
+    client: false
+  sorumatik_ai_generation_streaming_percent:
+    default: 0
+    min: 0
+    max: 100
     client: false

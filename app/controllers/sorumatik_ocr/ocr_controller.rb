@@ -132,8 +132,15 @@ module SorumatikOcr
         }
       end
 
-      # 5. Build Google Gemini 2.5 Flash Lite payload
-      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=#{api_key}")
+      # 5. Resolve Gemini OCR model: client parameter override (with format check) or SiteSetting
+      requested_model = (params[:model] || params[:engine]).to_s.strip
+      selected_model = if requested_model.present? && requested_model =~ /\Agemini-[a-zA-Z0-9.-]+\z/
+                         requested_model
+                       else
+                         SiteSetting.gemini_ocr_model.presence || "gemini-2.5-flash-lite"
+                       end
+
+      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{selected_model}:generateContent?key=#{api_key}")
 
       payload = {
         contents: [
@@ -194,7 +201,7 @@ module SorumatikOcr
       else
         render json: {
           success: true,
-          engine: "gemini_flash_lite",
+          engine: selected_model,
           question_latex: raw_text,
           raw_text: raw_text,
           title: "Soru",

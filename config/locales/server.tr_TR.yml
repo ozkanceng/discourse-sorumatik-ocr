@@ -1,14 +1,19 @@
 tr_TR:
   site_settings:
+    sorumatik_ai_generation_streaming_enabled: "Kalıcı AI üretimlerini MessageBus ile canlı göster (kapalıyken aynı üretimin durumu sorgulanır)."
+    sorumatik_ai_generation_streaming_percent: "Canlı AI üretim olaylarını alacak kullanıcıların yüzdesi."
     gemini_ocr_enabled: "Sorumatik Gemini OCR endpointini (/sorumatik/ocr) aktif et"
     gemini_ocr_api_key: "OCR için Google Gemini API Anahtarı"
     gemini_ocr_rate_limit_per_minute: "Kullanıcı başına dakikalık maksimum OCR istek sınırı"
+    gemini_ocr_model: "OCR görsel soru okuma için kullanılacak Google Gemini modeli (örn: gemini-2.5-flash-lite veya gemini-2.5-flash)"
     gemini_ai_solve_enabled: "Sorumatik doğrudan AI streaming soru çözüm endpointini (/sorumatik/stream-solve) aktif et"
     gemini_ai_solve_model: "Soru çözümü için kullanılacak Google Gemini modeli (örn: gemini-2.5-flash)"
     gemini_ai_solve_bot_username: "Çözümü forumda post olarak kaydedecek bot kullanıcısı adı (örn: sorumatik_ai)"
     gemini_ai_solve_rate_limit_per_minute: "Kullanıcı başına dakikalık maksimum AI soru çözüm istek sınırı"
     gemini_ai_solve_system_prompt: "AI soru çözümü için sistem promptu"
     gemini_ai_suppress_automation_bot_username: "Mobil sorularda engellenecek Discourse otomasyon botu kullanıcı adı (varsayılan: sorumatik_uzman_bot)"
+    gemini_ai_tools_enabled: "Sorumatik yapay zeka araçları (test, özet vb.) yüksek hızlı uç mimarisini aktif et"
+    gemini_ai_tools_model: "Yapay zeka araçları için kullanılacak Gemini modeli (varsayılan: gemini-2.5-flash)"
   sorumatik_ocr:
     api_key_missing: "Gemini OCR API anahtarı sunucuda tanımlı değil."
     image_missing: "İstekte görsel bulunamadı."

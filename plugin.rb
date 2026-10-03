@@ -98,7 +98,7 @@ after_initialize do
     mount ::SorumatikOcr::Engine, at: "/sorumatik"
   end
 
-  # Mobilden sorulan (soru-cozumu etiketli) konularda web otomasyon botunun (@sorumatik_uzman_bot veya @sorumatik_ai) çift cevap vermesini ve botların konu açmasını engelle
+  # Mobilden sorulan konularda web otomasyon botunun (@sorumatik_uzman_bot) ve mükerrer @sorumatik_ai yanıtlarının engellenmesi
   validate(:post, :validate_sorumatik_automation_suppression) do
     suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
     bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
@@ -112,9 +112,14 @@ after_initialize do
     end
 
     if user.present? && user.username.to_s.casecmp?(suppress_bot)
-      if topic.present? && (topic.tags.exists?(name: "soru-cozumu") || topic.custom_fields["ai_solve_handled"].present?)
-        Rails.logger.info("[Sorumatik AI] Suppressing automation bot #{suppress_bot} for topic ##{topic_id} (tagged: soru-cozumu)")
-        errors.add(:base, "Bu konu mobil uygulama çözümü içerdiği için otomasyon botu yanıtı engellendi.")
+      if topic.present?
+        has_ai_presence = topic.tags.exists?(name: "soru-cozumu") ||
+                          topic.custom_fields["ai_solve_handled"].present? ||
+                          topic.posts.joins(:user).where(users: { username: bot_username }).exists?
+        if has_ai_presence
+          Rails.logger.info("[Sorumatik AI] Suppressing automation bot #{suppress_bot} for topic ##{topic_id}")
+          errors.add(:base, "Bu konu mobil uygulama çözümü içerdiği için otomasyon botu yanıtı engellendi.")
+        end
       end
     end
 
@@ -124,6 +129,20 @@ after_initialize do
         if topic.posts.where(user_id: user.id).where.not(id: id).exists?
           Rails.logger.info("[Sorumatik AI] Suppressing duplicate bot reply on study PM ##{topic.id}")
           errors.add(:base, "Bu çalışma için zaten bir yanıt mevcut.")
+        end
+      end
+    end
+
+    # Genel Mükerrer Bot Cevabı Koruması:
+    # Herhangi bir kullanıcı mesajından sonra birden fazla bot cevabı (discourse-ai + discourse-sorumatik-ocr) üretilmesini engelle
+    if is_bot_user && topic.present? && topic.custom_fields["ai_module_handled"] != "true"
+      last_user_post = topic.posts.where.not(user_id: user.id).order(:post_number).last
+      if last_user_post.present?
+        existing_bot_replies = topic.posts.where(user_id: user.id).where("post_number > ?", last_user_post.post_number)
+        existing_bot_replies = existing_bot_replies.where.not(id: id) if id.present?
+        if existing_bot_replies.exists?
+          Rails.logger.info("[Sorumatik AI] Suppressing duplicate bot response (#{user.username}) on topic ##{topic.id} after post ##{last_user_post.post_number}")
+          errors.add(:base, "Bu soru/mesaj için zaten bir bot yanıtı mevcut.")
         end
       end
     end
@@ -142,9 +161,14 @@ after_initialize do
     end
 
     if post.user.present? && post.user.username.to_s.casecmp?(suppress_bot)
-      if t.present? && (t.tags.exists?(name: "soru-cozumu") || t.custom_fields["ai_solve_handled"].present?)
-        Rails.logger.info("[Sorumatik AI] Halting automation bot #{suppress_bot} post creation on topic ##{t.id}")
-        throw(:abort)
+      if t.present?
+        has_ai_presence = t.tags.exists?(name: "soru-cozumu") ||
+                          t.custom_fields["ai_solve_handled"].present? ||
+                          t.posts.joins(:user).where(users: { username: bot_username }).exists?
+        if has_ai_presence
+          Rails.logger.info("[Sorumatik AI] Halting automation bot #{suppress_bot} post creation on topic ##{t.id}")
+          throw(:abort)
+        end
       end
     end
 
@@ -154,6 +178,19 @@ after_initialize do
         existing_bot_posts = t.posts.where(user_id: post.user_id).count
         if existing_bot_posts >= 1 && post.id.nil?
           Rails.logger.info("[Sorumatik AI] Halting duplicate bot reply (#{post.user.username}) on study PM ##{t.id}")
+          throw(:abort)
+        end
+      end
+    end
+
+    # Genel Mükerrer Bot Cevabı Koruması:
+    # Herhangi bir kullanıcı mesajından sonra birden fazla bot cevabı (discourse-ai + discourse-sorumatik-ocr) üretilmesini engelle
+    if is_bot && t.present? && t.custom_fields["ai_module_handled"] != "true"
+      last_user_post = t.posts.where.not(user_id: post.user_id).order(:post_number).last
+      if last_user_post.present?
+        existing_bot_replies = t.posts.where(user_id: post.user_id).where("post_number > ?", last_user_post.post_number)
+        if existing_bot_replies.exists?
+          Rails.logger.info("[Sorumatik AI] Halting duplicate bot response (#{post.user.username}) on topic ##{t.id} after post ##{last_user_post.post_number}")
           throw(:abort)
         end
       end

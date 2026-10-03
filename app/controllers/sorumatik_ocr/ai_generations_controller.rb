@@ -3,6 +3,9 @@
 module SorumatikOcr
   class AiGenerationsController < ::ApplicationController
     requires_plugin PLUGIN_NAME
+    skip_before_action :check_xhr
+    skip_before_action :verify_authenticity_token
+    skip_before_action :redirect_to_login_if_required
     before_action :ensure_logged_in
 
     def create

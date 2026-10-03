@@ -6,6 +6,8 @@ module SorumatikOcr
     requires_plugin PLUGIN_NAME
     include ActionController::Live
     skip_before_action :check_xhr
+    skip_before_action :verify_authenticity_token
+    skip_before_action :redirect_to_login_if_required
     before_action :ensure_logged_in
 
     def stream

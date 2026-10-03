@@ -25,8 +25,7 @@ after_initialize do
   require_relative "lib/sorumatik_ocr/gemini_answer_stream"
   require_relative "lib/sorumatik_ocr/answer_generation"
   require_relative "app/controllers/sorumatik_ocr/ai_generations_controller"
-  require_dependency "jobs/base"
-  require_dependency "jobs/scheduled"
+  require_dependency "jobs/base" unless defined?(::Jobs::Base)
   require_relative "app/jobs/regular/sorumatik_generate_answer"
   require_relative "app/jobs/scheduled/sorumatik_recover_answers"
 

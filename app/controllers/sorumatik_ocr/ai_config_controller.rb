@@ -7,7 +7,7 @@ module SorumatikOcr
     skip_before_action :redirect_to_login_if_required
 
     # GET /sorumatik/ai-config
-    def config
+    def show
       begin
         limit = 60
         if current_user

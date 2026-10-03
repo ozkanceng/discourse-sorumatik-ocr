@@ -87,7 +87,7 @@ after_initialize do
     post "/ocr" => "ocr#extract"
     post "/stream-solve" => "ai_solve#stream"
     post "/ai-solve" => "ai_solve#stream"
-    get  "/ai-config" => "ai_config#config"
+    get  "/ai-config" => "ai_config#show"
     post "/save-study" => "ai_config#save_study"
     post "/save-solution" => "ai_config#save_solution"
     post "/ai-generations" => "ai_generations#create"

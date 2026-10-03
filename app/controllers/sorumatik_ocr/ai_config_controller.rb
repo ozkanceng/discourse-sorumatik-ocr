@@ -25,8 +25,9 @@ module SorumatikOcr
       model = (SiteSetting.respond_to?(:gemini_ai_tools_model) && SiteSetting.gemini_ai_tools_model.presence) || "gemini-2.5-flash"
       ocr_model = (SiteSetting.respond_to?(:gemini_ocr_model) && SiteSetting.gemini_ocr_model.presence) || "gemini-2.5-flash-lite"
       document_quiz_model = (SiteSetting.respond_to?(:gemini_document_quiz_model) && SiteSetting.gemini_document_quiz_model.presence) || model
-      enabled = (SiteSetting.respond_to?(:gemini_ocr_enabled) && SiteSetting.gemini_ocr_enabled) &&
-                (SiteSetting.respond_to?(:gemini_ai_tools_enabled) && SiteSetting.gemini_ai_tools_enabled)
+      ocr_enabled = SiteSetting.respond_to?(:gemini_ocr_enabled) ? SiteSetting.gemini_ocr_enabled : false
+      tools_enabled = SiteSetting.respond_to?(:gemini_ai_tools_enabled) ? SiteSetting.gemini_ai_tools_enabled : true
+      enabled = ocr_enabled && tools_enabled
 
       is_authorized = current_user.present? ||
                       request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4" ||

@@ -61,13 +61,13 @@ module SorumatikOcr
       end
 
       prompt = "Yapay Zeka Çalışma İsteği" if prompt.blank?
+      mute_notifications = params[:mute_notifications].to_s == "true" || params[:mute_notification].to_s == "true"
 
       bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
       bot_user = User.find_by_username(bot_username) || Discourse.system_user
 
       # 1. Create Private Message Post #1 from current_user
-      post1 = PostCreator.create!(
-        current_user,
+      post1_opts = {
         title: title,
         raw: prompt,
         archetype: "private_message",
@@ -75,6 +75,12 @@ module SorumatikOcr
         skip_validations: true,
         topic_opts: { custom_fields: { "ai_module_handled" => "true" } },
         custom_fields: { "ai_module_handled" => "true" }
+      }
+      post1_opts[:skip_notifications] = true if mute_notifications
+
+      post1 = PostCreator.create!(
+        current_user,
+        post1_opts
       )
 
       topic = post1&.topic
@@ -86,12 +92,27 @@ module SorumatikOcr
       topic.save_custom_fields(true)
 
       # 2. Create Post #2 from bot with the pre-generated AI content
-      post2 = PostCreator.create!(
-        bot_user,
+      post2_opts = {
         topic_id: topic.id,
         raw: content,
         skip_validations: true
+      }
+      post2_opts[:skip_notifications] = true if mute_notifications
+
+      post2 = PostCreator.create!(
+        bot_user,
+        post2_opts
       )
+
+      # 3. If requested (e.g. document quiz), mute this topic for current_user and purge any transient notifications
+      if mute_notifications
+        begin
+          TopicUser.change(current_user.id, topic.id, notification_level: TopicUser.notification_levels[:muted])
+          Notification.where(user_id: current_user.id, topic_id: topic.id).destroy_all
+        rescue => mute_err
+          Rails.logger.warn("[Sorumatik Save Study] Could not mute topic: #{mute_err.message}")
+        end
+      end
 
       render json: {
         success: true,

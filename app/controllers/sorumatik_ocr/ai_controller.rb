@@ -93,10 +93,15 @@ module SorumatikOcr
         payload[:generationConfig][:responseMimeType] = "application/json"
       end
 
-      budget = thinking_budget.to_i
+      budget = thinking_budget.present? ? thinking_budget.to_i : 0
+      budget = 0 if budget < 0
       if model.to_s.start_with?("gemini-2.5")
         payload[:generationConfig][:thinkingConfig] = {
-          thinkingBudget: budget >= 0 ? budget : (is_json ? 0 : -1)
+          thinkingBudget: budget
+        }
+      elsif model.to_s.start_with?("gemini-3")
+        payload[:generationConfig][:thinkingConfig] = {
+          thinkingLevel: budget == 0 ? "minimal" : "low"
         }
       end
 

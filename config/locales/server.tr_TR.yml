@@ -15,6 +15,9 @@ tr_TR:
     gemini_ai_tools_enabled: "Sorumatik yapay zeka araçları (test, özet vb.) yüksek hızlı uç mimarisini aktif et"
     gemini_ai_tools_model: "Yapay zeka araçları için kullanılacak Gemini modeli (varsayılan: gemini-2.5-flash)"
     gemini_document_quiz_model: "Belgeden/PDF'ten test oluşturma modülü için kullanılacak Gemini modeli (varsayılan: gemini-2.5-flash)"
+    gemini_ai_solve_thinking_level: "AI soru çözümünde düşünme (thinking/reasoning) derinlik seviyesi (default, minimal, low, medium, high)"
+    gemini_ai_rate_limit_per_minute: "Kullanıcı başına dakikalık maksimum genel AI proxy istek sınırı"
+    gemini_legacy_client_fallback: "Eski mobil sürümlere API anahtarı dönme desteği (güvenlik için kapalı tutulmalıdır)"
   sorumatik_ocr:
     api_key_missing: "Gemini OCR API anahtarı sunucuda tanımlı değil."
     image_missing: "İstekte görsel bulunamadı."

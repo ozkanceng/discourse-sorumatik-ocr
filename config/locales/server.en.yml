@@ -15,6 +15,9 @@ en:
     gemini_ai_tools_enabled: "Enable Sorumatik high-speed edge architecture for AI study tools (quiz, summary, etc.)"
     gemini_ai_tools_model: "Google Gemini model to use for AI tools (default: gemini-2.5-flash)"
     gemini_document_quiz_model: "Google Gemini model to use for Document/PDF Quiz module (default: gemini-2.5-flash)"
+    gemini_ai_solve_thinking_level: "Reasoning depth/thinking level for AI question solver (default, minimal, low, medium, high)"
+    gemini_ai_rate_limit_per_minute: "Maximum general AI proxy requests per user per minute"
+    gemini_legacy_client_fallback: "Return API key to legacy mobile clients (keep false for security)"
   sorumatik_ocr:
     api_key_missing: "Gemini OCR API key is not configured on the server."
     image_missing: "No image file provided in request."

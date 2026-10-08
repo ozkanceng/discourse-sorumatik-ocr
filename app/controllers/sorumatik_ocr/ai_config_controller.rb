@@ -29,6 +29,8 @@ module SorumatikOcr
       tools_enabled = SiteSetting.respond_to?(:gemini_ai_tools_enabled) ? SiteSetting.gemini_ai_tools_enabled : true
       enabled = ocr_enabled && tools_enabled
 
+      legacy_fallback = SiteSetting.respond_to?(:gemini_legacy_client_fallback) ? SiteSetting.gemini_legacy_client_fallback : true
+
       is_authorized = current_user.present? ||
                       request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4" ||
                       request.headers["User-Api-Key"].present?
@@ -36,10 +38,11 @@ module SorumatikOcr
       render json: {
         success: true,
         enabled: !!enabled,
+        proxy: true,
         model: model,
         ocr_model: ocr_model,
         document_quiz_model: document_quiz_model,
-        api_key: is_authorized ? api_key : ""
+        api_key: (is_authorized && legacy_fallback) ? api_key : ""
       }
     rescue => err
       Rails.logger.error("[Sorumatik AI Config] Error: #{err.message}")

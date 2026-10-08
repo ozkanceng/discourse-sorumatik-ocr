@@ -2,7 +2,7 @@
 
 # name: discourse-sorumatik-ocr
 # about: Sorumatik için ultra hızlı Google Gemini 2.5 Flash-Lite tabanlı Matematik/Sınav OCR eklentisi.
-# version: 1.0.0
+# version: 1.1.0
 # authors: Sorumatik
 # url: https://github.com/ozkanceng/discourse-sorumatik-ocr
 
@@ -21,10 +21,12 @@ after_initialize do
   require_relative "app/controllers/sorumatik_ocr/ocr_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_solve_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_config_controller"
+  require_relative "app/controllers/sorumatik_ocr/ai_controller"
   require_relative "app/models/sorumatik_ocr/ai_generation"
   require_relative "lib/sorumatik_ocr/gemini_answer_stream"
   require_relative "lib/sorumatik_ocr/answer_generation"
   require_relative "app/controllers/sorumatik_ocr/ai_generations_controller"
+  require_relative "app/controllers/sorumatik_ocr/study_rooms_controller"
   require_dependency "jobs/base" unless defined?(::Jobs::Base)
   require_relative "app/jobs/regular/sorumatik_generate_answer"
   require_relative "app/jobs/scheduled/sorumatik_recover_answers"
@@ -88,10 +90,19 @@ after_initialize do
     post "/stream-solve" => "ai_solve#stream"
     post "/ai-solve" => "ai_solve#stream"
     get  "/ai-config" => "ai_config#show"
+    post "/ai/generate" => "ai#generate"
+    post "/ai/tts" => "ai#tts"
+    post "/ai/coach" => "ai#coach"
+    post "/ai/plan" => "ai#plan"
+    post "/ai/solve" => "ai#solve"
     post "/save-study" => "ai_config#save_study"
     post "/save-solution" => "ai_config#save_solution"
     post "/ai-generations" => "ai_generations#create"
     get "/ai-generations/:id" => "ai_generations#show"
+    post "/study-rooms/:id/heartbeat" => "study_rooms#heartbeat"
+    post "/study-rooms/:id/leave"     => "study_rooms#leave"
+    post "/study-rooms/:id/cheer"     => "study_rooms#cheer"
+    get  "/study-rooms/summary"        => "study_rooms#summary"
   end
 
   Discourse::Application.routes.append do

@@ -47,3 +47,9 @@ plugins:
     min: 0
     max: 100
     client: false
+  gemini_ai_rate_limit_per_minute:
+    default: 30
+    client: false
+  gemini_legacy_client_fallback:
+    default: true
+    client: false

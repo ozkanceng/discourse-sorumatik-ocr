@@ -28,18 +28,27 @@ module SorumatikOcr
       tools_enabled = SiteSetting.respond_to?(:gemini_ai_tools_enabled) ? SiteSetting.gemini_ai_tools_enabled : true
       enabled = ocr_enabled && tools_enabled
 
+      authorized = current_user.present? || request.headers["User-Api-Key"].present? || request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4"
+      api_key = (authorized && enabled) ? resolve_api_key : ""
+
       render json: {
         success: true,
         enabled: !!enabled,
-        proxy: true,
+        proxy: api_key.blank?,
         model: model,
         ocr_model: ocr_model,
         document_quiz_model: document_quiz_model,
-        api_key: ""
+        api_key: api_key
       }
     rescue => err
       Rails.logger.error("[Sorumatik AI Config] Error: #{err.message}")
       render json: { success: false, error: err.message }, status: 500
+    end
+
+    private
+
+    def resolve_api_key
+      (SiteSetting.respond_to?(:gemini_ocr_api_key) && SiteSetting.gemini_ocr_api_key.presence) || ENV["GEMINI_API_KEY"]
     end
 
     # POST /sorumatik/save-study

@@ -132,51 +132,59 @@ module SorumatikOcr
 
       voice = params[:voice].presence || "Kore"
       api_key = resolve_api_key
-      model = "gemini-2.5-flash-preview-tts"
+      model = "gemini-3.8-flash-tts"
 
       payload = {
-        contents: [{ parts: [{ text: text }] }],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: voice
-              }
-            }
-          }
+        model: model,
+        input: [{
+          type: "user_input",
+          content: [{
+            type: "text",
+            text: text
+          }]
+        }],
+        response_format: {
+          type: "audio"
+        },
+        generation_config: {
+          speech_config: [
+            { voice: voice }
+          ]
         }
       }
 
-      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model}:generateContent?key=#{api_key}")
+      uri = URI("https://generativelanguage.googleapis.com/v1beta/interactions")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
-      http.open_timeout = 5
+      http.open_timeout = 10
       http.read_timeout = 30
 
-      req = Net::HTTP::Post.new(uri.request_uri, { "Content-Type" => "application/json" })
+      req = Net::HTTP::Post.new(uri.request_uri, {
+        "Content-Type" => "application/json",
+        "x-goog-api-key" => api_key
+      })
       req.body = payload.to_json
 
       res = http.request(req)
       if res.code.to_i == 200
         parsed = JSON.parse(res.body)
-        candidates = parsed["candidates"] || []
-        parts = candidates.first&.dig("content", "parts") || []
-        audio_part = parts.find { |p| p.dig("inlineData", "mimeType")&.start_with?("audio/") }
+        steps = parsed["steps"] || []
+        audio_step = steps.reverse.find { |s| s["type"] == "model_output" }
+        audio_content = audio_step&.dig("content")&.find { |c| c["type"] == "audio" }
+        audio_base64 = audio_content&.dig("data")
+        audio_mime = audio_content&.dig("mime_type") || "audio/wav"
 
-        if audio_part
-          audio_base64 = audio_part.dig("inlineData", "data")
-          audio_mime = audio_part.dig("inlineData", "mimeType") || "audio/wav"
+        if audio_base64.present?
           render json: {
             success: true,
             mime_type: audio_mime,
             audio_base64: audio_base64
           }
         else
-          render_json_error("Ses verisi üretilemedi", status: 502)
+          render_json_error("Ses verisi üretilemedi", status: 500)
         end
       else
-        render_json_error("Google TTS servisi yanıt vermedi (Kod: #{res.code})", status: 502)
+        render_json_error("Google TTS servisi yanıt vermedi (Kod: #{res.code})", status: 500)
       end
     rescue => e
       render_json_error("TTS servisi bağlantı hatası: #{e.message}", status: 500)
@@ -433,10 +441,13 @@ module SorumatikOcr
       response.headers["Cache-Control"] = "no-cache"
       response.headers["X-Accel-Buffering"] = "no"
 
-      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model}:streamGenerateContent?alt=sse&key=#{api_key}")
+      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model}:streamGenerateContent?alt=sse")
 
-      Net::HTTP.start(uri.host, uri.port, use_ssl: true, read_timeout: 90) do |http|
-        req = Net::HTTP::Post.new(uri.request_uri, { "Content-Type" => "application/json" })
+      Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 90) do |http|
+        req = Net::HTTP::Post.new(uri.request_uri, {
+          "Content-Type" => "application/json",
+          "x-goog-api-key" => api_key
+        })
         req.body = payload.to_json
 
         http.request(req) do |res|

@@ -54,8 +54,7 @@ module SorumatikOcr
       model = params[:model].presence || (SiteSetting.respond_to?(:gemini_ai_tools_model) ? SiteSetting.gemini_ai_tools_model.presence : nil) || "gemini-2.5-flash"
       media_parts = params[:media_parts] || params[:mediaParts] || []
       is_json = params[:is_json].to_s == "true" || params[:isJson].to_s == "true"
-      temperature = (params[:temperature] || 0.3).to_f
-      thinking_budget = params[:thinking_budget] || params[:thinkingBudget]
+      thinking_level = params[:thinking_level].presence || params[:thinkingLevel].presence
 
       if prompt.blank? && media_parts.blank?
         return render_json_error("Prompt veya medya gereklidir", status: 400)
@@ -77,32 +76,31 @@ module SorumatikOcr
       end
       parts << { text: prompt } if prompt.present?
 
+      generation_config = {
+        maxOutputTokens: resolve_max_output_tokens(model)
+      }
+
+      if is_json
+        generation_config[:responseMimeType] = "application/json"
+      end
+
+      if thinking_level.present? && thinking_level != "default"
+        if model.to_s.start_with?("gemini-2.5")
+          generation_config[:thinkingConfig] = { thinkingBudget: (thinking_level == "minimal" ? 0 : -1) }
+        else
+          # Gemini 3.7, 3.8 and 3.1 Pro do not support 'minimal', gracefully fallback to 'low'
+          effective_level = (thinking_level == "minimal" && model.to_s =~ /gemini-3\.(?:[78]|1-pro)/) ? "low" : thinking_level
+          generation_config[:thinkingConfig] = { thinkingLevel: effective_level }
+        end
+      end
+
       payload = {
         contents: [{ parts: parts }],
-        generationConfig: {
-          temperature: temperature,
-          maxOutputTokens: resolve_max_output_tokens(model)
-        }
+        generationConfig: generation_config
       }
 
       if system_instruction.present?
         payload[:systemInstruction] = { parts: [{ text: system_instruction }] }
-      end
-
-      if is_json
-        payload[:generationConfig][:responseMimeType] = "application/json"
-      end
-
-      budget = thinking_budget.present? ? thinking_budget.to_i : 0
-      budget = 0 if budget < 0
-      if model.to_s.start_with?("gemini-2.5")
-        payload[:generationConfig][:thinkingConfig] = {
-          thinkingBudget: budget
-        }
-      elsif model.to_s.start_with?("gemini-3")
-        payload[:generationConfig][:thinkingConfig] = {
-          thinkingLevel: budget == 0 ? "minimal" : "low"
-        }
       end
 
       api_key = resolve_api_key
@@ -225,7 +223,6 @@ module SorumatikOcr
           parts: [{ text: COACH_SYSTEM_INSTRUCTION }]
         },
         generationConfig: {
-          temperature: 0.7,
           maxOutputTokens: 2048
         }
       }
@@ -282,7 +279,6 @@ module SorumatikOcr
           parts: [{ text: SOLVER_SYSTEM_INSTRUCTION }]
         },
         generationConfig: {
-          temperature: 0.2,
           maxOutputTokens: 3000
         }
       }
@@ -340,7 +336,6 @@ module SorumatikOcr
           parts: [{ text: PLAN_SYSTEM_INSTRUCTION }]
         },
         generationConfig: {
-          temperature: 0.3,
           maxOutputTokens: 4000,
           responseMimeType: "application/json"
         }

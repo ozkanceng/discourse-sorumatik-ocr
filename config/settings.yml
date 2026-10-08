@@ -24,8 +24,14 @@ plugins:
   gemini_ai_solve_rate_limit_per_minute:
     default: 15
     client: false
-  gemini_ai_solve_thinking_budget:
-    default: 0
+  gemini_ai_solve_thinking_level:
+    default: "default"
+    enum:
+      - "default"
+      - "minimal"
+      - "low"
+      - "medium"
+      - "high"
     client: false
   gemini_ai_solve_system_prompt:
     default: "Sen Sorumatik platformunda uzman, pedagojik formasyona sahip kıdemli bir öğretmensin. Öğrencilerin sorduğu soruları adım adım, anlaşılır, cesaretlendirici ve eğitici bir dille açıkla. Matematiksel formülleri $...$ veya $$...$$ içine al. Gereksiz giriş-çıkış lafı yapmadan doğrudan soru çözümüne odaklan."

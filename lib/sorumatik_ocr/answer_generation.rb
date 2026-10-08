@@ -99,23 +99,22 @@ module SorumatikOcr
       @metrics.merge!("model" => model, "prompt_sha256" => Digest::SHA256.hexdigest(prompt))
       contents = build_contents(source)
       @metrics["images_ready_ms"] = elapsed
-      budget = SiteSetting.respond_to?(:gemini_ai_solve_thinking_budget) ? SiteSetting.gemini_ai_solve_thinking_budget.to_i : 0
-      thinking_cfg = if model.to_s.start_with?("gemini-2.5")
-        { thinkingBudget: budget }
-      elsif budget == 0
-        { thinkingLevel: "minimal" }
-      else
-        { thinkingLevel: "low" }
+      level = SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) ? SiteSetting.gemini_ai_solve_thinking_level.to_s.strip : "default"
+      gen_config = { maxOutputTokens: 16_384 }
+      if level.present? && level != "default"
+        if model.to_s.start_with?("gemini-2.5")
+          gen_config[:thinkingConfig] = { thinkingBudget: (level == "minimal" ? 0 : -1) }
+        else
+          # Gemini 3.7, 3.8 and 3.1 Pro do not support 'minimal', gracefully fallback to 'low'
+          effective_level = (level == "minimal" && model.to_s =~ /gemini-3\.(?:[78]|1-pro)/) ? "low" : level
+          gen_config[:thinkingConfig] = { thinkingLevel: effective_level }
+        end
       end
 
       payload = {
         contents: contents,
         systemInstruction: { parts: [{ text: prompt }] },
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 16_384,
-          thinkingConfig: thinking_cfg
-        },
+        generationConfig: gen_config,
       }
       @metrics["upstream_sent_ms"] = elapsed
       raw = +""

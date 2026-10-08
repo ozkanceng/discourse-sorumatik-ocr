@@ -112,7 +112,6 @@ module SorumatikOcr
 
         prompt_text = custom_prompt || default_timetable_prompt
         generation_cfg = {
-          temperature: 0.1,
           maxOutputTokens: 4096,
           responseMimeType: "application/json"
         }
@@ -121,11 +120,7 @@ module SorumatikOcr
         lang = (params[:lang] || "tr").to_s.downcase
         prompt_text = custom_prompt || (lang == "tr" ? "Bu görseldeki sınav/matematik sorusunu metin ve LaTeX formatında çıkar." : "Extract the exam question in text and LaTeX.")
         generation_cfg = {
-          temperature: 0.1,
-          maxOutputTokens: 2048,
-          thinkingConfig: {
-            thinkingBudget: 0
-          }
+          maxOutputTokens: 2048
         }
         system_instruction = {
           parts: [{ text: SYSTEM_PROMPT }]

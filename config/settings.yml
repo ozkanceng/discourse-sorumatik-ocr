@@ -60,5 +60,5 @@ plugins:
     default: 30
     client: false
   gemini_legacy_client_fallback:
-    default: true
+    default: false
     client: false

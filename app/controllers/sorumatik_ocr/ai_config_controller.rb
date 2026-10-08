@@ -21,19 +21,12 @@ module SorumatikOcr
         Rails.logger.warn("[Sorumatik AI Config] RateLimiter notice: #{rl_err.message}")
       end
 
-      api_key = (SiteSetting.respond_to?(:gemini_ocr_api_key) && SiteSetting.gemini_ocr_api_key.presence) || ENV["GEMINI_API_KEY"] || ""
       model = (SiteSetting.respond_to?(:gemini_ai_tools_model) && SiteSetting.gemini_ai_tools_model.presence) || "gemini-2.5-flash"
       ocr_model = (SiteSetting.respond_to?(:gemini_ocr_model) && SiteSetting.gemini_ocr_model.presence) || "gemini-2.5-flash-lite"
       document_quiz_model = (SiteSetting.respond_to?(:gemini_document_quiz_model) && SiteSetting.gemini_document_quiz_model.presence) || model
       ocr_enabled = SiteSetting.respond_to?(:gemini_ocr_enabled) ? SiteSetting.gemini_ocr_enabled : false
       tools_enabled = SiteSetting.respond_to?(:gemini_ai_tools_enabled) ? SiteSetting.gemini_ai_tools_enabled : true
       enabled = ocr_enabled && tools_enabled
-
-      legacy_fallback = SiteSetting.respond_to?(:gemini_legacy_client_fallback) ? SiteSetting.gemini_legacy_client_fallback : true
-
-      is_authorized = current_user.present? ||
-                      request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4" ||
-                      request.headers["User-Api-Key"].present?
 
       render json: {
         success: true,
@@ -42,7 +35,7 @@ module SorumatikOcr
         model: model,
         ocr_model: ocr_model,
         document_quiz_model: document_quiz_model,
-        api_key: (is_authorized && legacy_fallback) ? api_key : ""
+        api_key: ""
       }
     rescue => err
       Rails.logger.error("[Sorumatik AI Config] Error: #{err.message}")

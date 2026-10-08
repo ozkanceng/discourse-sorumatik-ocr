@@ -45,12 +45,15 @@ module SorumatikOcr
     PROMPT
 
     def extract
-      # 1. Check if plugin is enabled
+      # 1. Authorization: user must be logged in OR have a valid User-Api-Key OR provide mobile client id
+      return unless ensure_authorized!
+
+      # 2. Check if plugin is enabled
       unless SiteSetting.gemini_ocr_enabled
         return render_json_error("Gemini OCR plugin is disabled", status: 503)
       end
 
-      # 2. Rate limiting (per user or per IP)
+      # 3. Rate limiting (per user or per IP)
       limit = SiteSetting.gemini_ocr_rate_limit_per_minute.to_i
       limit = 30 if limit <= 0
       if current_user
@@ -59,38 +62,53 @@ module SorumatikOcr
         RateLimiter.new(nil, "sorumatik_ocr_#{request.remote_ip}", limit, 1.minute).performed!
       end
 
-      # 3. Resolve API key (from SiteSetting or ENV)
+      # 4. Resolve API key (from SiteSetting or ENV)
       api_key = SiteSetting.gemini_ocr_api_key.presence || ENV["GEMINI_API_KEY"]
       if api_key.blank?
         Rails.logger.error("[Sorumatik OCR] Gemini API key is missing in SiteSetting / ENV.")
         return render_json_error(I18n.t("sorumatik_ocr.api_key_missing"), status: 500)
       end
 
-      # 4. Handle incoming image file
+      # 5. Handle incoming image file or base64 data
       image_param = params[:image]
-      if image_param.blank?
-        return render_json_error(I18n.t("sorumatik_ocr.image_missing"), status: 400)
-      end
+      image_base64_param = params[:image_base64].presence || params[:data].presence
 
-      image_bytes = if image_param.respond_to?(:tempfile)
-                      image_param.tempfile.read
-                    elsif image_param.respond_to?(:read)
-                      image_param.read
+      base64_data = nil
+      mime_type = "image/jpeg"
+
+      if image_param.present?
+        image_bytes = if image_param.respond_to?(:tempfile)
+                        image_param.tempfile.read
+                      elsif image_param.respond_to?(:read)
+                        image_param.read
+                      else
+                        image_param.to_s
+                      end
+
+        if image_bytes.blank?
+          return render_json_error(I18n.t("sorumatik_ocr.image_missing"), status: 400)
+        end
+
+        mime_type = if image_param.respond_to?(:content_type) && image_param.content_type.present?
+                      image_param.content_type
                     else
-                      image_param.to_s
+                      "image/jpeg"
                     end
 
-      if image_bytes.blank?
+        base64_data = Base64.strict_encode64(image_bytes)
+      elsif image_base64_param.present?
+        raw_b64 = image_base64_param.to_s
+        if raw_b64 =~ /\Adata:(image\/[a-zA-Z0-9.+-]+);base64,(.+)\z/m
+          mime_type = $1
+          base64_data = $2
+        else
+          mime_type = params[:image_mime_type].presence || params[:mime_type].presence || "image/jpeg"
+          base64_data = raw_b64
+        end
+      else
         return render_json_error(I18n.t("sorumatik_ocr.image_missing"), status: 400)
       end
 
-      mime_type = if image_param.respond_to?(:content_type) && image_param.content_type.present?
-                    image_param.content_type
-                  else
-                    "image/jpeg"
-                  end
-
-      base64_data = Base64.strict_encode64(image_bytes)
       mode = (params[:type] || params[:mode] || "question").to_s.downcase
       custom_prompt = params[:prompt].presence
       branch = params[:branch].presence
@@ -211,5 +229,15 @@ module SorumatikOcr
       Rails.logger.error("[Sorumatik OCR] Exception in OCR: #{e.class}: #{e.message}\n#{e.backtrace.first(5).join("\n")}")
       render_json_error("Internal error during OCR", status: 500)
     end
+  end
+
+  private
+
+  def ensure_authorized!
+    unless current_user.present? || request.headers["User-Api-Key"].present? || request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4"
+      render_json_error(I18n.t("sorumatik_ocr.auth_required", default: "Bu işlem için oturum açmanız veya geçerli bir istemci kullanmanız gerekmektedir"), status: 401)
+      return false
+    end
+    true
   end
 end

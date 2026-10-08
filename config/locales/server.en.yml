@@ -20,6 +20,6 @@ en:
     image_missing: "No image file provided in request."
     rate_limited: "Too many requests. Please wait a moment."
     gemini_error: "Gemini AI service temporarily unavailable."
-    auth_required: "Authentication is required for AI question solving."
+    auth_required: "Authentication or a valid client is required for this operation."
     topic_missing: "Valid topic_id is missing."
     bot_not_found: "Configured bot user was not found."

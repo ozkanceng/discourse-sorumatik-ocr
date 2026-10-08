@@ -20,6 +20,6 @@ tr_TR:
     image_missing: "İstekte görsel bulunamadı."
     rate_limited: "Çok fazla istek gönderildi. Lütfen biraz bekleyin."
     gemini_error: "Gemini AI servisine erişilemedi."
-    auth_required: "AI soru çözümü için oturum açılması gereklidir."
+    auth_required: "Bu işlem için oturum açmanız veya geçerli bir istemci kullanmanız gerekmektedir."
     topic_missing: "Geçerli bir konu (topic_id) belirtilmedi."
     bot_not_found: "Belirtilen bot kullanıcısı bulunamadı."

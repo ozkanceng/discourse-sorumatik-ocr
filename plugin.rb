@@ -56,13 +56,8 @@ after_initialize do
   end
 
   on(:post_created) do |post, _opts|
-    if SorumatikOcr::AnswerGeneration.managed_source?(post)
-      begin
-        SorumatikOcr::AnswerGeneration.start!(post)
-      rescue StandardError => e
-        Rails.logger.warn("sorumatik_ai enqueue_failed source_post_id=#{post.id} error=#{e.class}")
-      end
-    end
+    # Server-side auto Sidekiq solve on post_created is bypassed in favor of direct Edge streaming.
+    # On-demand or fallback server solvers trigger explicitly via POST /sorumatik/ai-generations.
   end
 
   add_to_serializer(:topic_view, :sorumatik_pending_generation) do

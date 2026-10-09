@@ -50,22 +50,57 @@ module SorumatikOcr
       generation
     end
 
-    # Compatibility for installed clients that already have generated text.
-    # Import and generation share the same source lock and unique record.
     def self.import!(source, raw)
       generation = nil
+      cleaned_raw = raw.to_s.strip
+      return nil if cleaned_raw.blank?
+
       source.with_lock do
         generation = AiGeneration.find_by(source_post_id: source.id)
         if generation
-          return generation if generation.state == "completed" && generation.raw == raw.strip
-          raise GeminiAnswerStream::Failure.new("answer_conflict")
+          if generation.state == "completed" && generation.post_id.present?
+            post = Post.find_by(id: generation.post_id)
+            if post && post.raw != cleaned_raw
+              post.revise(Discourse.system_user, { raw: cleaned_raw }, skip_validations: true, bypass_bump: true)
+            end
+            generation.update!(raw: cleaned_raw, content_sha256: Digest::SHA256.hexdigest(cleaned_raw))
+            return generation
+          end
+
+          generation.update!(
+            state: "persisting",
+            raw: cleaned_raw,
+            content_sha256: Digest::SHA256.hexdigest(cleaned_raw),
+            error: nil,
+            sequence: generation.sequence + 1
+          )
+        else
+          bot = User.find_by_username(SiteSetting.gemini_ai_solve_bot_username)
+          existing = source.topic.posts.where(user_id: bot&.id).where("post_number > ?", source.post_number)
+            .where(reply_to_post_number: source.post_number == 1 ? [nil, 1] : source.post_number).order(:post_number).first
+
+          if existing
+            existing.revise(Discourse.system_user, { raw: cleaned_raw }, skip_validations: true, bypass_bump: true) if existing.raw != cleaned_raw
+            generation = AiGeneration.create!(
+              source_post_id: source.id,
+              topic_id: source.topic_id,
+              user_id: source.user_id,
+              raw: cleaned_raw,
+              state: "completed",
+              post_id: existing.id,
+              content_sha256: Digest::SHA256.hexdigest(cleaned_raw)
+            )
+          else
+            generation = AiGeneration.create!(
+              source_post_id: source.id,
+              topic_id: source.topic_id,
+              user_id: source.user_id,
+              raw: cleaned_raw,
+              state: "persisting",
+              content_sha256: Digest::SHA256.hexdigest(cleaned_raw)
+            )
+          end
         end
-        bot = User.find_by_username(SiteSetting.gemini_ai_solve_bot_username)
-        existing = source.topic.posts.where(user_id: bot&.id).where("post_number > ?", source.post_number)
-          .where(reply_to_post_number: source.post_number == 1 ? [nil, 1] : source.post_number).order(:post_number).first
-        raise GeminiAnswerStream::Failure.new("answer_conflict") if existing && existing.raw != raw.strip
-        generation = AiGeneration.create!(source_post_id: source.id, topic_id: source.topic_id, user_id: source.user_id,
-                                          raw: raw.strip, state: existing ? "completed" : "persisting", post_id: existing&.id)
       end
       new(generation).persist! unless generation.state == "completed"
       generation.reload

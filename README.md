@@ -66,19 +66,3 @@ Derleme tamamlandıktan sonra Discourse Yönetici Paneline gidin:
   - `image`: Görsel dosyası (JPEG veya PNG)
   - `lang`: `tr`
 
-
-## Mobil canlı cevap protokolü 2
-
-Mobil kaynak mesajlarında `client_edge_solve=true` ve `mobile_answer_protocol=2`
-alanları mesaj oluşturulurken saklanır. Bu kaynaklar sunucuda veya Discourse AI
-adapter'larında ikinci bir cevap üretmez. Tamamlanan mobil cevap
-`save-solution` ile bir kez kaydedilir; aynı içerik aynı postu, farklı içerik
-`409` sonucunu verir. Web ve eski istemci üretim yolu korunur.
-
-Bu güncellemeyi yalnız
-[`ozkanceng/discourse-fcm-notifications`](https://github.com/ozkanceng/discourse-fcm-notifications)
-çatalındaki mobil sahiplik korumasıyla birlikte kurun. Önce iki sunucu
-eklentisini güncelleyip Discourse'u rebuild edin; ardından yeni mobil
-istemciyi yayımlayın. GitHub'a kod gönderilmesi sunucunun güncellenmesi değildir.
-
-[Yayın sırası, API sözleşmesi ve kabul testleri](docs/mobile-answer-protocol.md).

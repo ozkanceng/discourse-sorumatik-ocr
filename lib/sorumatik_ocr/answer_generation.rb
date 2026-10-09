@@ -59,7 +59,7 @@ module SorumatikOcr
 
     def self.import!(source, raw)
       generation = nil
-      cleaned_raw = raw.to_s.strip
+      cleaned_raw = raw.to_s.gsub("\r\n", "\n").strip
       return nil if cleaned_raw.blank?
 
       source.with_lock do
@@ -71,12 +71,14 @@ module SorumatikOcr
           if generation.state == "completed" && generation.post_id.present?
             post = Post.find_by(id: generation.post_id)
             raise GeminiAnswerStream::Failure.new("answer_missing") unless post && post.deleted_at.nil?
-            raise GeminiAnswerStream::Failure.new("answer_conflict") if post.raw != cleaned_raw
+            post_clean = post.raw.to_s.gsub("\r\n", "\n").strip
+            raise GeminiAnswerStream::Failure.new("answer_conflict") if post_clean != cleaned_raw
             generation.update!(raw: cleaned_raw, content_sha256: Digest::SHA256.hexdigest(cleaned_raw))
             return generation
           end
 
-          if generation.raw.present? && generation.raw != cleaned_raw && %w[persisting failed].include?(generation.state)
+          gen_clean = generation.raw.to_s.gsub("\r\n", "\n").strip
+          if generation.raw.present? && gen_clean != cleaned_raw && %w[persisting failed].include?(generation.state)
             raise GeminiAnswerStream::Failure.new("answer_conflict")
           end
           generation.update!(
@@ -92,7 +94,8 @@ module SorumatikOcr
             .where(reply_to_post_number: source.post_number == 1 ? [nil, 1] : source.post_number).order(:post_number).first
 
           if existing
-            raise GeminiAnswerStream::Failure.new("answer_conflict") if existing.raw != cleaned_raw
+            existing_clean = existing.raw.to_s.gsub("\r\n", "\n").strip
+            raise GeminiAnswerStream::Failure.new("answer_conflict") if existing_clean != cleaned_raw
             generation = AiGeneration.create!(
               source_post_id: source.id,
               topic_id: source.topic_id,
@@ -214,7 +217,9 @@ module SorumatikOcr
                                     custom_fields: { "sorumatik_generation_id" => @generation.generation_id })
           post = creator.create!
           # A post hook must not silently rewrite the content already streamed.
-          raise "Saved answer differs from streamed answer" unless post&.persisted? && post.raw == @generation.raw
+          post_clean = post&.raw.to_s.gsub("\r\n", "\n").strip
+          gen_clean = @generation.raw.to_s.gsub("\r\n", "\n").strip
+          raise "Saved answer differs from streamed answer" unless post&.persisted? && post_clean == gen_clean
           metrics = @generation.metrics.merge("saved_at" => Time.current.iso8601(3),
                                               "save_ms" => ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - save_started) * 1000).round,
                                               "total_ms" => ((Time.current - @generation.created_at) * 1000).round)

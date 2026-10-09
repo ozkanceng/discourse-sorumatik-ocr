@@ -38,6 +38,7 @@ module SorumatikOcr
         success: true,
         mobile_answer_protocol: 2,
         enabled: !!enabled,
+        save_solution_enabled: true,
         proxy: api_key.blank?,
         model: model,
         solve_model: solve_model,
@@ -145,10 +146,14 @@ module SorumatikOcr
       guardian.ensure_can_see!(topic)
       source = params[:source_post_id].present? ? topic.posts.find(params[:source_post_id]) : topic.first_post
       raise Discourse::InvalidAccess unless source && source.deleted_at.nil? && source.post_type == Post.types[:regular] && source.user_id == current_user.id
-      content = params[:content].to_s.strip
+      content = params[:content].to_s.gsub("\r\n", "\n").strip
       return render_json_error("Content is required", status: 400) if content.blank?
-      if params[:content_sha256].present? && params[:content_sha256] != Digest::SHA256.hexdigest(content)
-        return render json: { success: false, error: "content_hash_mismatch" }, status: 409
+      if params[:content_sha256].present?
+        raw_param = params[:content].to_s
+        expected_hashes = [Digest::SHA256.hexdigest(content), Digest::SHA256.hexdigest(raw_param)]
+        unless expected_hashes.include?(params[:content_sha256])
+          return render json: { success: false, error: "content_hash_mismatch" }, status: 409
+        end
       end
       previous = AiGeneration.find_by(source_post_id: source.id)
       generation = AnswerGeneration.import!(source, content)

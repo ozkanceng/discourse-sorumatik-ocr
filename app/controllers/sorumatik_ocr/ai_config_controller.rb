@@ -22,6 +22,9 @@ module SorumatikOcr
       end
 
       model = (SiteSetting.respond_to?(:gemini_ai_tools_model) && SiteSetting.gemini_ai_tools_model.presence) || "gemini-2.5-flash"
+      solve_model = (SiteSetting.respond_to?(:gemini_ai_solve_model) && SiteSetting.gemini_ai_solve_model.presence) || model
+      solve_system_prompt = (SiteSetting.respond_to?(:gemini_ai_solve_system_prompt) && SiteSetting.gemini_ai_solve_system_prompt.presence) || ""
+      solve_thinking_level = (SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) && SiteSetting.gemini_ai_solve_thinking_level.presence) || "default"
       ocr_model = (SiteSetting.respond_to?(:gemini_ocr_model) && SiteSetting.gemini_ocr_model.presence) || "gemini-2.5-flash-lite"
       document_quiz_model = (SiteSetting.respond_to?(:gemini_document_quiz_model) && SiteSetting.gemini_document_quiz_model.presence) || model
       ocr_enabled = SiteSetting.respond_to?(:gemini_ocr_enabled) ? SiteSetting.gemini_ocr_enabled : false
@@ -36,6 +39,9 @@ module SorumatikOcr
         enabled: !!enabled,
         proxy: api_key.blank?,
         model: model,
+        solve_model: solve_model,
+        solve_system_prompt: solve_system_prompt,
+        solve_thinking_level: solve_thinking_level,
         ocr_model: ocr_model,
         document_quiz_model: document_quiz_model,
         api_key: api_key

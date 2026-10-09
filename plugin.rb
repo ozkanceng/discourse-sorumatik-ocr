@@ -56,8 +56,17 @@ after_initialize do
   end
 
   on(:post_created) do |post, _opts|
-    # Server-side auto Sidekiq solve on post_created is bypassed in favor of direct Edge streaming.
-    # On-demand or fallback server solvers trigger explicitly via POST /sorumatik/ai-generations.
+    if SorumatikOcr::AnswerGeneration.managed_source?(post)
+      # Mobilden doğrudan client edge akışı ile açılan ilk post ise sunucu kuyruğunu atla
+      # Web üzerinden açılan sorular, takip soruları ve hazır cevap baloncukları için sunucu çözümünü derhal başlat
+      next if post.is_first_post? && (post.custom_fields["client_edge_solve"] == "true" || post.topic&.custom_fields&.[]("client_edge_solve") == "true")
+
+      begin
+        SorumatikOcr::AnswerGeneration.start!(post)
+      rescue StandardError => e
+        Rails.logger.warn("sorumatik_ai enqueue_failed source_post_id=#{post.id} error=#{e.class}")
+      end
+    end
   end
 
   add_to_serializer(:topic_view, :sorumatik_pending_generation) do

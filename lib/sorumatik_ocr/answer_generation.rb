@@ -213,6 +213,7 @@ module SorumatikOcr
       begin
         creator.trigger_after_events
         creator.enqueue_jobs
+        post&.publish_change_to_clients!(:created) if post.respond_to?(:publish_change_to_clients!)
       rescue StandardError => e
         # Notification errors cannot invalidate or duplicate a committed answer.
         Rails.logger.warn("sorumatik_ai post_hooks_failed generation_id=#{@generation.generation_id} error=#{e.class}")

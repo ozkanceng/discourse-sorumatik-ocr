@@ -20,6 +20,18 @@ module SorumatikOcr
       end
       generation = AnswerGeneration.start!(source)
       render json: generation.snapshot, status: generation.terminal? ? 200 : 202
+    rescue GeminiAnswerStream::Failure => e
+      render json: { success: false, error: e.code }, status: 409
+    end
+
+    def by_source
+      source = Post.find_by(id: params[:source_post_id])
+      raise Discourse::NotFound unless source && source.deleted_at.nil?
+      guardian.ensure_can_see!(source.topic)
+      raise Discourse::InvalidAccess unless source.user_id == current_user.id
+      generation = AiGeneration.find_by(source_post_id: source.id)
+      raise Discourse::NotFound unless generation
+      render json: generation.snapshot
     end
 
     def show

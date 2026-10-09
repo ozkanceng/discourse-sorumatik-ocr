@@ -36,6 +36,7 @@ module SorumatikOcr
 
       render json: {
         success: true,
+        mobile_answer_protocol: 2,
         enabled: !!enabled,
         proxy: api_key.blank?,
         model: model,
@@ -146,8 +147,13 @@ module SorumatikOcr
       raise Discourse::InvalidAccess unless source && source.deleted_at.nil? && source.post_type == Post.types[:regular] && source.user_id == current_user.id
       content = params[:content].to_s.strip
       return render_json_error("Content is required", status: 400) if content.blank?
+      if params[:content_sha256].present? && params[:content_sha256] != Digest::SHA256.hexdigest(content)
+        return render json: { success: false, error: "content_hash_mismatch" }, status: 409
+      end
+      previous = AiGeneration.find_by(source_post_id: source.id)
       generation = AnswerGeneration.import!(source, content)
-      render json: generation.snapshot.merge(success: generation.state == "completed"),
+      duplicate = previous && previous.post_id.present? && previous.post_id == generation.post_id
+      render json: generation.snapshot.merge(success: generation.state == "completed", duplicate: !!duplicate),
              status: generation.state == "completed" ? 200 : 202
     rescue GeminiAnswerStream::Failure => e
       return render json: { success: false, error: e.code }, status: 409

@@ -18,6 +18,21 @@ after_initialize do
     end
   end
 
+  # Permit only the two ownership fields, never arbitrary post custom fields.
+  %w[client_edge_solve mobile_answer_protocol].each do |name|
+    Post.plugin_permitted_create_params[name] = { type: :string, plugin: self }
+  end
+  module ::SorumatikOcr::MobileSourceFields
+    def setup_post
+      super
+      if @opts[:client_edge_solve].to_s == "true" && @opts[:mobile_answer_protocol].to_i == 2
+        @post.custom_fields["client_edge_solve"] = "true"
+        @post.custom_fields["mobile_answer_protocol"] = "2"
+      end
+    end
+  end
+  PostCreator.prepend(SorumatikOcr::MobileSourceFields)
+
   require_relative "app/controllers/sorumatik_ocr/ocr_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_solve_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_config_controller"
@@ -56,16 +71,15 @@ after_initialize do
   end
 
   on(:post_created) do |post, _opts|
-    if SorumatikOcr::AnswerGeneration.managed_source?(post)
-      # Mobilden doğrudan client edge akışı ile açılan ilk post ise sunucu kuyruğunu atla
-      # Web üzerinden açılan sorular, takip soruları ve hazır cevap baloncukları için sunucu çözümünü derhal başlat
-      next if post.is_first_post? && (post.custom_fields["client_edge_solve"] == "true" || post.topic&.custom_fields&.[]("client_edge_solve") == "true")
+    # Versioned mobile ownership is checked before any automatic generation.
+    next unless SorumatikOcr::AnswerGeneration.managed_source?(post)
+    # Preserve the first-answer ownership flag used by older mobile clients.
+    next if post.is_first_post? && (post.custom_fields["client_edge_solve"] == "true" || post.topic&.custom_fields&.[]("client_edge_solve") == "true")
 
-      begin
-        SorumatikOcr::AnswerGeneration.start!(post)
-      rescue StandardError => e
-        Rails.logger.warn("sorumatik_ai enqueue_failed source_post_id=#{post.id} error=#{e.class}")
-      end
+    begin
+      SorumatikOcr::AnswerGeneration.start!(post)
+    rescue StandardError => e
+      Rails.logger.warn("sorumatik_ai enqueue_failed source_post_id=#{post.id} error=#{e.class}")
     end
   end
 
@@ -79,6 +93,13 @@ after_initialize do
         { generation_id: generation.generation_id, source_post_id: generation.source_post_id }
       end
     end
+  end
+
+  add_to_serializer(:post, :client_edge_solve) do
+    SorumatikOcr::AnswerGeneration.client_owned_source?(object)
+  end
+  add_to_serializer(:post, :mobile_answer_protocol) do
+    object.custom_fields["mobile_answer_protocol"].to_i
   end
 
   # Raw is the shared renderer's source on both topic loads and single-post reads.
@@ -102,6 +123,7 @@ after_initialize do
     post "/save-study" => "ai_config#save_study"
     post "/save-solution" => "ai_config#save_solution"
     post "/ai-generations" => "ai_generations#create"
+    get "/ai-generations/by-source/:source_post_id" => "ai_generations#by_source"
     get "/ai-generations/:id" => "ai_generations#show"
     post "/study-rooms/:id/heartbeat" => "study_rooms#heartbeat"
     post "/study-rooms/:id/leave"     => "study_rooms#leave"

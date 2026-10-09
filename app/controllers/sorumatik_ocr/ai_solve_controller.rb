@@ -36,6 +36,8 @@ module SorumatikOcr
         break if generation.terminal? || Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
         sleep 0.25
       end
+    rescue GeminiAnswerStream::Failure => e
+      render json: { success: false, error: e.code }, status: 409
     rescue IOError, ActionController::Live::ClientDisconnected
       # Disconnecting the legacy transport never restarts or cancels the job.
     ensure

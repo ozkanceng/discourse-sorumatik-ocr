@@ -7,7 +7,13 @@ module SorumatikOcr
   class AnswerGeneration
     MAX_SECONDS = 90
 
+    def self.client_owned_source?(source)
+      source && source.custom_fields["client_edge_solve"].to_s == "true" &&
+        source.custom_fields["mobile_answer_protocol"].to_i >= 2
+    end
+
     def self.managed_source?(source)
+      return false if client_owned_source?(source)
       return false unless SiteSetting.gemini_ai_solve_enabled && source&.user && source.topic
       return false unless source.post_type == Post.types[:regular] && source.deleted_at.nil?
       return false if [SiteSetting.gemini_ai_solve_bot_username, SiteSetting.gemini_ai_suppress_automation_bot_username].include?(source.user.username)
@@ -20,6 +26,7 @@ module SorumatikOcr
     end
 
     def self.start!(source)
+      raise GeminiAnswerStream::Failure.new("client_owned_source") if client_owned_source?(source)
       generation = nil
       source.with_lock do
         unless AiGeneration.exists?(source_post_id: source.id)
@@ -58,15 +65,20 @@ module SorumatikOcr
       source.with_lock do
         generation = AiGeneration.find_by(source_post_id: source.id)
         if generation
+          if generation.state == "generating"
+            raise GeminiAnswerStream::Failure.new("answer_in_progress")
+          end
           if generation.state == "completed" && generation.post_id.present?
             post = Post.find_by(id: generation.post_id)
-            if post && post.raw != cleaned_raw
-              post.revise(Discourse.system_user, { raw: cleaned_raw }, skip_validations: true, bypass_bump: true)
-            end
+            raise GeminiAnswerStream::Failure.new("answer_missing") unless post && post.deleted_at.nil?
+            raise GeminiAnswerStream::Failure.new("answer_conflict") if post.raw != cleaned_raw
             generation.update!(raw: cleaned_raw, content_sha256: Digest::SHA256.hexdigest(cleaned_raw))
             return generation
           end
 
+          if generation.raw.present? && generation.raw != cleaned_raw && %w[persisting failed].include?(generation.state)
+            raise GeminiAnswerStream::Failure.new("answer_conflict")
+          end
           generation.update!(
             state: "persisting",
             raw: cleaned_raw,
@@ -80,7 +92,7 @@ module SorumatikOcr
             .where(reply_to_post_number: source.post_number == 1 ? [nil, 1] : source.post_number).order(:post_number).first
 
           if existing
-            existing.revise(Discourse.system_user, { raw: cleaned_raw }, skip_validations: true, bypass_bump: true) if existing.raw != cleaned_raw
+            raise GeminiAnswerStream::Failure.new("answer_conflict") if existing.raw != cleaned_raw
             generation = AiGeneration.create!(
               source_post_id: source.id,
               topic_id: source.topic_id,
@@ -127,6 +139,7 @@ module SorumatikOcr
       @generation.publish!
       source = @generation.source_post
       raise GeminiAnswerStream::Failure.new("access_revoked") unless source && source.deleted_at.nil? && Guardian.new(source.user).can_see?(source.topic)
+      raise GeminiAnswerStream::Failure.new("client_owned_source") if self.class.client_owned_source?(source)
       key = SiteSetting.gemini_ocr_api_key.presence || ENV["GEMINI_API_KEY"]
       raise GeminiAnswerStream::Failure.new("missing_api_key") if key.blank?
       model = SiteSetting.gemini_ai_solve_model
@@ -213,7 +226,6 @@ module SorumatikOcr
       begin
         creator.trigger_after_events
         creator.enqueue_jobs
-        post&.publish_change_to_clients!(:created) if post.respond_to?(:publish_change_to_clients!)
       rescue StandardError => e
         # Notification errors cannot invalidate or duplicate a committed answer.
         Rails.logger.warn("sorumatik_ai post_hooks_failed generation_id=#{@generation.generation_id} error=#{e.class}")

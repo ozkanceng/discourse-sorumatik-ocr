@@ -229,15 +229,15 @@ module SorumatikOcr
       Rails.logger.error("[Sorumatik OCR] Exception in OCR: #{e.class}: #{e.message}\n#{e.backtrace.first(5).join("\n")}")
       render_json_error("Internal error during OCR", status: 500)
     end
-  end
 
-  private
+    private
 
-  def ensure_authorized!
-    unless current_user.present? || request.headers["User-Api-Key"].present? || request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4"
-      render_json_error(I18n.t("sorumatik_ocr.auth_required", default: "Bu işlem için oturum açmanız veya geçerli bir istemci kullanmanız gerekmektedir"), status: 401)
-      return false
+    def ensure_authorized!
+      unless current_user.present? || request.headers["User-Api-Key"].present? || request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4"
+        render_json_error(I18n.t("sorumatik_ocr.auth_required", default: "Bu işlem için oturum açmanız veya geçerli bir istemci kullanmanız gerekmektedir"), status: 401)
+        return false
+      end
+      true
     end
-    true
   end
 end

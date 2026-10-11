@@ -6,10 +6,16 @@ require "digest"
 module SorumatikOcr
   class AnswerGeneration
     MAX_SECONDS = 90
+    CLIENT_LEASE_SECONDS = 90
 
-    def self.client_owned_source?(source)
-      source && source.custom_fields["client_edge_solve"].to_s == "true" &&
-        source.custom_fields["mobile_answer_protocol"].to_i >= 2
+    def self.client_owned_source?(source, lease_seconds: CLIENT_LEASE_SECONDS)
+      return false unless source
+      return false unless source.custom_fields["client_edge_solve"].to_s == "true" &&
+                          source.custom_fields["mobile_answer_protocol"].to_i >= 2
+
+      created = source.created_at || (Time.respond_to?(:current) ? Time.current : Time.now)
+      current = Time.respond_to?(:current) ? Time.current : Time.now
+      (current - created) < lease_seconds
     end
 
     def self.managed_source?(source)
@@ -25,8 +31,8 @@ module SorumatikOcr
       source.raw.match?(/@#{Regexp.escape(bot)}\b/i) || source.reply_to_post&.user&.username == bot
     end
 
-    def self.start!(source)
-      raise GeminiAnswerStream::Failure.new("client_owned_source") if client_owned_source?(source)
+    def self.start!(source, fallback: false)
+      raise GeminiAnswerStream::Failure.new("client_owned_source") if !fallback && client_owned_source?(source)
       generation = nil
       source.with_lock do
         unless AiGeneration.exists?(source_post_id: source.id)
@@ -37,6 +43,7 @@ module SorumatikOcr
           g.topic_id = source.topic_id
           g.user_id = source.user_id
         end
+        generation.update!(metrics: (generation.metrics || {}).merge("fallback" => true)) if fallback
         generation.with_lock do
           # Adopt already persisted legacy answers without generating another one.
           if generation.state == "queued"
@@ -142,7 +149,8 @@ module SorumatikOcr
       @generation.publish!
       source = @generation.source_post
       raise GeminiAnswerStream::Failure.new("access_revoked") unless source && source.deleted_at.nil? && Guardian.new(source.user).can_see?(source.topic)
-      raise GeminiAnswerStream::Failure.new("client_owned_source") if self.class.client_owned_source?(source)
+      is_fallback = @generation.metrics&.[]("fallback") == true
+      raise GeminiAnswerStream::Failure.new("client_owned_source") if !is_fallback && self.class.client_owned_source?(source)
       key = SiteSetting.gemini_ocr_api_key.presence || ENV["GEMINI_API_KEY"]
       raise GeminiAnswerStream::Failure.new("missing_api_key") if key.blank?
       model = SiteSetting.gemini_ai_solve_model

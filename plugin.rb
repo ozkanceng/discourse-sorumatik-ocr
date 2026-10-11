@@ -44,6 +44,7 @@ after_initialize do
   require_relative "app/controllers/sorumatik_ocr/study_rooms_controller"
   require_dependency "jobs/base" unless defined?(::Jobs::Base)
   require_relative "app/jobs/regular/sorumatik_generate_answer"
+  require_relative "app/jobs/regular/sorumatik_fallback_answer"
   require_relative "app/jobs/scheduled/sorumatik_recover_answers"
 
   begin
@@ -71,10 +72,15 @@ after_initialize do
   end
 
   on(:post_created) do |post, _opts|
+    # When a question is created with client_edge_solve from mobile,
+    # schedule a fallback job in 95 seconds in case the client fails to complete or save the answer.
+    if post.is_first_post? && (post.custom_fields["client_edge_solve"] == "true" || post.topic&.custom_fields&.[]("client_edge_solve") == "true")
+      Jobs.enqueue_in(95.seconds, :sorumatik_fallback_answer, post_id: post.id)
+      next
+    end
+
     # Versioned mobile ownership is checked before any automatic generation.
     next unless SorumatikOcr::AnswerGeneration.managed_source?(post)
-    # Preserve the first-answer ownership flag used by older mobile clients.
-    next if post.is_first_post? && (post.custom_fields["client_edge_solve"] == "true" || post.topic&.custom_fields&.[]("client_edge_solve") == "true")
 
     begin
       SorumatikOcr::AnswerGeneration.start!(post)

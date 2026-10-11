@@ -5,6 +5,7 @@ module ::Jobs
     every 1.minute
 
     def execute(_args)
+      # 1. Recover stalled AiGeneration records
       SorumatikOcr::AiGeneration.where(state: %w[queued persisting generating]).where("updated_at < ?", 2.minutes.ago).find_each do |generation|
         if generation.state == "generating"
           generation.with_lock do
@@ -15,6 +16,45 @@ module ::Jobs
           generation.publish!
         else
           Jobs.enqueue(:sorumatik_generate_answer, generation_id: generation.id)
+        end
+      end
+
+      # 2. Recover orphaned 'soru-cozumu' topics where the client failed to post an answer after 2 minutes
+      recover_orphaned_topics!
+    end
+
+    private
+
+    def recover_orphaned_topics!
+      return unless SiteSetting.gemini_ai_solve_enabled
+
+      bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
+      bot = User.find_by_username(bot_username)
+      return unless bot
+
+      # Look for topics created in the last 24 hours, older than 2 minutes, with soru-cozumu tag and exactly 1 post (unanswered)
+      orphaned_topics = Topic.joins(:tags)
+                             .where(tags: { name: "soru-cozumu" })
+                             .where("topics.created_at > ? AND topics.created_at < ?", 24.hours.ago, 2.minutes.ago)
+                             .where(posts_count: 1)
+                             .where(deleted_at: nil)
+
+      orphaned_topics.find_each do |topic|
+        first_post = topic.first_post
+        next unless first_post && first_post.deleted_at.nil? && first_post.post_type == Post.types[:regular]
+        next if first_post.user_id == bot.id
+
+        has_bot_answer = topic.posts.where(user_id: bot.id).exists?
+        next if has_bot_answer
+
+        gen = SorumatikOcr::AiGeneration.find_by(source_post_id: first_post.id)
+        next if gen && %w[completed persisting generating].include?(gen.state)
+
+        Rails.logger.info("[Sorumatik AI] SorumatikRecoverAnswers recovering orphaned topic ##{topic.id}")
+        begin
+          SorumatikOcr::AnswerGeneration.start!(first_post, fallback: true)
+        rescue StandardError => e
+          Rails.logger.warn("[Sorumatik AI] Recovery failed for topic ##{topic.id}: #{e.class} - #{e.message}")
         end
       end
     end

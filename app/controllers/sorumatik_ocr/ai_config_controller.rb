@@ -27,6 +27,9 @@ module SorumatikOcr
       solve_thinking_level = (SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) && SiteSetting.gemini_ai_solve_thinking_level.presence) || "default"
       ocr_model = (SiteSetting.respond_to?(:gemini_ocr_model) && SiteSetting.gemini_ocr_model.presence) || "gemini-2.5-flash-lite"
       document_quiz_model = (SiteSetting.respond_to?(:gemini_document_quiz_model) && SiteSetting.gemini_document_quiz_model.presence) || model
+      tts_model = (SiteSetting.respond_to?(:gemini_tts_model) && SiteSetting.gemini_tts_model.presence) ||
+                  (SiteSetting.respond_to?(:blackboard_tts_model) && SiteSetting.blackboard_tts_model.presence) ||
+                  "gemini-3.8-flash-lite-tts"
       ocr_enabled = SiteSetting.respond_to?(:gemini_ocr_enabled) ? SiteSetting.gemini_ocr_enabled : false
       tools_enabled = SiteSetting.respond_to?(:gemini_ai_tools_enabled) ? SiteSetting.gemini_ai_tools_enabled : true
       enabled = ocr_enabled && tools_enabled
@@ -46,6 +49,7 @@ module SorumatikOcr
         solve_thinking_level: solve_thinking_level,
         ocr_model: ocr_model,
         document_quiz_model: document_quiz_model,
+        tts_model: tts_model,
         api_key: api_key
       }
     rescue => err

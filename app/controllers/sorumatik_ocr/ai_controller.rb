@@ -135,7 +135,10 @@ module SorumatikOcr
 
       voice = params[:voice].presence || "Kore"
       api_key = resolve_api_key
-      model = "gemini-3.8-flash-tts"
+      model = params[:model].presence ||
+              (SiteSetting.respond_to?(:gemini_tts_model) && SiteSetting.gemini_tts_model.presence) ||
+              (SiteSetting.respond_to?(:blackboard_tts_model) && SiteSetting.blackboard_tts_model.presence) ||
+              "gemini-3.8-flash-lite-tts"
 
       payload = {
         model: model,
@@ -178,10 +181,12 @@ module SorumatikOcr
         audio_mime = audio_content&.dig("mime_type") || "audio/wav"
 
         if audio_base64.present?
+          clean_base64 = sanitize_wav_base64(audio_base64)
           render json: {
             success: true,
-            mime_type: audio_mime,
-            audio_base64: audio_base64
+            mime_type: "audio/wav",
+            audio_base64: clean_base64,
+            model: model
           }
         else
           render_json_error("Ses verisi üretilemedi", status: 500)
@@ -466,6 +471,71 @@ module SorumatikOcr
       response.stream.write("data: #{ { error: e.message }.to_json }\n\n")
     ensure
       response.stream.close rescue nil
+    end
+
+    def sanitize_wav_base64(raw_base64)
+      return raw_base64 if raw_base64.blank?
+      begin
+        bytes = Base64.decode64(raw_base64)
+        return raw_base64 if bytes.bytesize < 44
+
+        # If it's a RIFF WAVE file, extract only the PCM audio from the data chunk
+        data = bytes
+        sample_rate = 24_000
+        channels = 1
+        bits_per_sample = 16
+
+        while data.bytesize >= 12 && data[0, 4] == "RIFF" && data[8, 4] == "WAVE"
+          offset = 12
+          found_data = false
+          while offset + 8 <= data.bytesize
+            chunk_id = data[offset, 4]
+            chunk_size = data[offset + 4, 4].unpack1("V")
+            offset += 8
+            if chunk_id == "fmt " && chunk_size >= 16
+              channels = data[offset + 2, 2].unpack1("v") rescue 1
+              sample_rate = data[offset + 4, 4].unpack1("V") rescue 24_000
+              bits_per_sample = data[offset + 14, 2].unpack1("v") rescue 16
+            elsif chunk_id == "data"
+              end_offset = [offset + chunk_size, data.bytesize].min
+              data = data[offset...end_offset]
+              found_data = true
+              break
+            end
+            offset += chunk_size + (chunk_size % 2)
+          end
+          break unless found_data
+        end
+
+        pcm_len = data.bytesize & ~1
+        return raw_base64 if pcm_len < 4
+        pcm = data[0...pcm_len]
+
+        # Apply gentle 10ms ramp-out (240 samples at 24kHz) to eliminate end pops / cızırtı
+        samples = pcm.unpack("s<*")
+        ramp = [240, samples.length / 4].min
+        if ramp > 0
+          ramp.times do |i|
+            factor = i.to_f / ramp
+            idx = samples.length - 1 - i
+            samples[idx] = (samples[idx] * factor).round
+          end
+        end
+        clean_pcm = samples.pack("s<*")
+
+        # Repack into a single clean RIFF WAV without any trailing C2PA/manifest chunks
+        data_size = clean_pcm.bytesize
+        bytes_per_sample = (bits_per_sample / 8).clamp(1, 4)
+        byte_rate = sample_rate * channels * bytes_per_sample
+        block_align = channels * bytes_per_sample
+        clean_wav = ["RIFF", 36 + data_size, "WAVE", "fmt ", 16, 1, channels, sample_rate,
+                     byte_rate, block_align, bits_per_sample,
+                     "data", data_size].pack("A4VA4A4VvvVVvvA4V") + clean_pcm
+        Base64.strict_encode64(clean_wav)
+      rescue => e
+        Rails.logger.warn("[Sorumatik AI TTS] sanitize_wav_base64 fallback: #{e.message}")
+        raw_base64
+      end
     end
   end
 end

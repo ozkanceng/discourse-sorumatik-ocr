@@ -56,3 +56,6 @@ plugins:
   gemini_legacy_client_fallback:
     default: false
     client: false
+  gemini_tts_model:
+    default: "gemini-3.8-flash-lite-tts"
+    client: false

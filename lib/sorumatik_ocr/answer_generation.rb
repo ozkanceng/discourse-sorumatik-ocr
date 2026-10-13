@@ -18,6 +18,28 @@ module SorumatikOcr
       (current - created) < lease_seconds
     end
 
+    def self.question_topic?(topic)
+      return false unless topic
+      return true if topic.respond_to?(:tags) && topic.tags.respond_to?(:exists?) && topic.tags.exists?(name: "soru-cozumu")
+      return true if topic.respond_to?(:custom_fields) && topic.custom_fields["client_edge_solve"].to_s == "true"
+
+      first_post = topic.respond_to?(:first_post) ? topic.first_post : nil
+      if first_post&.respond_to?(:custom_fields)
+        return true if first_post.custom_fields["client_edge_solve"].to_s == "true"
+      end
+
+      # Kategori bazlı eşleme yalnızca yönetici panelinden açıkça ayarlanmışsa uygulanır
+      setting = SiteSetting.respond_to?(:gemini_ai_solve_category_ids) ? SiteSetting.gemini_ai_solve_category_ids.to_s.strip : ""
+      if !setting.empty?
+        category_id = topic.respond_to?(:category_id) ? topic.category_id : nil
+        if category_id
+          allowed = setting.split("|").map { |id| id.strip.to_i }.reject(&:zero?)
+          return true if allowed.include?(category_id)
+        end
+      end
+      false
+    end
+
     def self.managed_source?(source)
       return false if client_owned_source?(source)
       return false unless SiteSetting.gemini_ai_solve_enabled && source&.user && source.topic
@@ -25,7 +47,7 @@ module SorumatikOcr
       return false if [SiteSetting.gemini_ai_solve_bot_username, SiteSetting.gemini_ai_suppress_automation_bot_username].include?(source.user.username)
       return false unless Guardian.new(source.user).can_see?(source.topic)
       return true if AiGeneration.exists?(source_post_id: source.id)
-      return false unless source.topic.tags.exists?(name: "soru-cozumu")
+      return false unless question_topic?(source.topic)
       return true if source.post_number == 1
       bot = SiteSetting.gemini_ai_solve_bot_username
       source.raw.match?(/@#{Regexp.escape(bot)}\b/i) || source.reply_to_post&.user&.username == bot

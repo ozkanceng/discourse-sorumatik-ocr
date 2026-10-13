@@ -33,6 +33,9 @@ plugins:
   gemini_ai_suppress_automation_bot_username:
     default: "sorumatik_uzman_bot"
     client: false
+  gemini_ai_solve_category_ids:
+    default: ""
+    client: false
   gemini_ai_tools_enabled:
     default: true
     client: false

@@ -16,8 +16,8 @@ module SorumatikOcr
       bot = @bot_user || (respond_to?(:user) ? user : nil)
       if bot && bot.username.to_s.casecmp?(suppress_bot)
         t = source_post&.topic
-        if t && (t.tags.exists?(name: "soru-cozumu") ||
-                 t.custom_fields["ai_solve_handled"].present? ||
+        if t && (AnswerGeneration.question_topic?(t) ||
+                 !t.custom_fields&.[]("ai_solve_handled").to_s.strip.empty? ||
                  (t.respond_to?(:posts) && t.posts.respond_to?(:joins) && t.posts.joins(:user).where(users: { username: bot_username }).exists?))
           Rails.logger.info("[Sorumatik AI] Gracefully skipping automation bot #{suppress_bot} in Playground for topic ##{t.id}") if defined?(Rails)
           return nil

@@ -32,12 +32,22 @@ module ::Jobs
       bot = User.find_by_username(bot_username)
       return unless bot
 
-      # Look for topics created in the last 24 hours, older than 2 minutes, with soru-cozumu tag and exactly 1 post (unanswered)
-      orphaned_topics = Topic.joins(:tags)
-                             .where(tags: { name: "soru-cozumu" })
-                             .where("topics.created_at > ? AND topics.created_at < ?", 24.hours.ago, 2.minutes.ago)
-                             .where(posts_count: 1)
-                             .where(deleted_at: nil)
+      cat_setting = SiteSetting.respond_to?(:gemini_ai_solve_category_ids) ? SiteSetting.gemini_ai_solve_category_ids.to_s.strip : ""
+      if !cat_setting.empty?
+        category_ids = cat_setting.split("|").map { |id| id.strip.to_i }.reject(&:zero?)
+        orphaned_topics = Topic.left_joins(:tags)
+                               .where("tags.name = 'soru-cozumu' OR topics.category_id IN (?)", category_ids)
+                               .where("topics.created_at > ? AND topics.created_at < ?", 24.hours.ago, 2.minutes.ago)
+                               .where(posts_count: 1)
+                               .where(deleted_at: nil)
+                               .distinct
+      else
+        orphaned_topics = Topic.joins(:tags)
+                               .where(tags: { name: "soru-cozumu" })
+                               .where("topics.created_at > ? AND topics.created_at < ?", 24.hours.ago, 2.minutes.ago)
+                               .where(posts_count: 1)
+                               .where(deleted_at: nil)
+      end
 
       orphaned_topics.find_each do |topic|
         first_post = topic.first_post

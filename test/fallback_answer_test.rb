@@ -16,11 +16,12 @@ module SorumatikOcr
 end
 
 class MockSiteSetting
-  attr_accessor :gemini_ai_solve_enabled, :gemini_ai_solve_bot_username, :gemini_ai_suppress_automation_bot_username
+  attr_accessor :gemini_ai_solve_enabled, :gemini_ai_solve_bot_username, :gemini_ai_suppress_automation_bot_username, :gemini_ai_solve_category_ids
   def initialize
     @gemini_ai_solve_enabled = true
     @gemini_ai_solve_bot_username = "sorumatik_ai"
     @gemini_ai_suppress_automation_bot_username = "sorumatik_uzman_bot"
+    @gemini_ai_solve_category_ids = "163|162|164|6|7|8|9|10|11|12"
   end
 end
 
@@ -33,12 +34,14 @@ class Post
 end unless defined?(Post)
 
 class MockTopic
-  attr_accessor :tags, :custom_fields, :posts, :id
+  attr_accessor :tags, :custom_fields, :posts, :id, :category_id, :first_post
   def initialize
     @id = 123
+    @category_id = 163
     @tags = []
     @custom_fields = {}
     @posts = []
+    @first_post = nil
   end
 end
 
@@ -63,6 +66,7 @@ class MockPost
     @custom_fields = {}
     @topic = MockTopic.new
     @topic.tags = MockTagList.new(["soru-cozumu"])
+    @topic.first_post = self
     @user = Struct.new(:username).new("student")
     @deleted_at = nil
     @post_type = 1
@@ -128,6 +132,60 @@ class FallbackAnswerTest < Minitest::Test
 
     # When reply_to is called for sorumatik_uzman_bot on a soru-cozumu topic, it should return nil
     result = skip_caller.reply_to(@post)
+    assert_nil result
+  end
+
+  def test_question_topic_detected_by_soru_cozumu_tag
+    topic_with_tag = MockTopic.new
+    topic_with_tag.tags = MockTagList.new(["soru-cozumu"])
+    assert_equal true, SorumatikOcr::AnswerGeneration.question_topic?(topic_with_tag)
+  end
+
+  def test_question_topic_detected_by_client_edge_solve
+    topic = MockTopic.new
+    topic.tags = MockTagList.new([])
+    topic.custom_fields["client_edge_solve"] = "true"
+    assert_equal true, SorumatikOcr::AnswerGeneration.question_topic?(topic)
+  end
+
+  def test_non_question_topic_without_tag_or_flag_is_false
+    regular_topic = MockTopic.new
+    regular_topic.tags = MockTagList.new([])
+    SiteSetting.gemini_ai_solve_category_ids = ""
+    assert_equal false, SorumatikOcr::AnswerGeneration.question_topic?(regular_topic)
+  end
+
+  def test_question_topic_respects_explicit_category_setting
+    topic = MockTopic.new
+    topic.tags = MockTagList.new([])
+    topic.category_id = 163
+    SiteSetting.gemini_ai_solve_category_ids = "163|162"
+    assert_equal true, SorumatikOcr::AnswerGeneration.question_topic?(topic)
+    SiteSetting.gemini_ai_solve_category_ids = ""
+  end
+
+  def test_managed_ai_reply_skips_automation_bot_on_soru_cozumu_tagged_topic
+    post = MockPost.new(Time.now)
+    post.topic.tags = MockTagList.new(["soru-cozumu"])
+
+    skip_caller = Object.new
+    skip_caller.extend(SorumatikOcr::ManagedAiReply)
+    skip_caller.instance_variable_set(:@bot_user, Struct.new(:username).new("sorumatik_uzman_bot"))
+
+    result = skip_caller.reply_to(post)
+    assert_nil result
+  end
+
+  def test_managed_ai_reply_skips_automation_bot_on_client_edge_solve_topic
+    post = MockPost.new(Time.now)
+    post.topic.tags = MockTagList.new([])
+    post.custom_fields["client_edge_solve"] = "true"
+
+    skip_caller = Object.new
+    skip_caller.extend(SorumatikOcr::ManagedAiReply)
+    skip_caller.instance_variable_set(:@bot_user, Struct.new(:username).new("sorumatik_uzman_bot"))
+
+    result = skip_caller.reply_to(post)
     assert_nil result
   end
 end

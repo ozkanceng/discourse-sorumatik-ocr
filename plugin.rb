@@ -28,6 +28,10 @@ after_initialize do
       if @opts[:client_edge_solve].to_s == "true" && @opts[:mobile_answer_protocol].to_i == 2
         @post.custom_fields["client_edge_solve"] = "true"
         @post.custom_fields["mobile_answer_protocol"] = "2"
+        if @post.topic.present?
+          @post.topic.custom_fields["client_edge_solve"] = "true"
+          @post.topic.custom_fields["mobile_answer_protocol"] = "2"
+        end
       end
     end
   end
@@ -72,6 +76,23 @@ after_initialize do
   end
 
   on(:post_created) do |post, _opts|
+    is_mobile = post.custom_fields["client_edge_solve"] == "true" ||
+                post.topic&.custom_fields&.[]("client_edge_solve") == "true" ||
+                (_opts.is_a?(Hash) && (_opts[:client_edge_solve].to_s == "true" || _opts[:mobile_answer_protocol].to_i >= 1))
+
+    # Mobilden açılan konularda kullanıcı yetkisinden (TL0) bağımsız olarak sistem yetkisiyle soru-cozumu etiketini garantiye al
+    if post.is_first_post? && is_mobile && post.topic.present?
+      begin
+        if defined?(DiscourseTagging)
+          DiscourseTagging.tag_topic_by_names(post.topic, Discourse.system_user.guardian, ["soru-cozumu"], append: true)
+        end
+        post.topic.custom_fields["client_edge_solve"] = "true"
+        post.topic.save_custom_fields(true)
+      rescue => tag_err
+        Rails.logger.warn("[Sorumatik AI] Failed to auto-tag mobile topic: #{tag_err.message}")
+      end
+    end
+
     # When a question is created with client_edge_solve from mobile,
     # schedule a fallback job in 95 seconds in case the client fails to complete or save the answer.
     if post.is_first_post? && (post.custom_fields["client_edge_solve"] == "true" || post.topic&.custom_fields&.[]("client_edge_solve") == "true")
@@ -156,7 +177,7 @@ after_initialize do
 
     if user.present? && user.username.to_s.casecmp?(suppress_bot)
       if topic.present?
-        has_ai_presence = topic.tags.exists?(name: "soru-cozumu") ||
+        has_ai_presence = SorumatikOcr::AnswerGeneration.question_topic?(topic) ||
                           topic.custom_fields["ai_solve_handled"].present? ||
                           topic.posts.joins(:user).where(users: { username: bot_username }).exists?
         if has_ai_presence
@@ -205,7 +226,7 @@ after_initialize do
 
     if post.user.present? && post.user.username.to_s.casecmp?(suppress_bot)
       if t.present?
-        has_ai_presence = t.tags.exists?(name: "soru-cozumu") ||
+        has_ai_presence = SorumatikOcr::AnswerGeneration.question_topic?(t) ||
                           t.custom_fields["ai_solve_handled"].present? ||
                           t.posts.joins(:user).where(users: { username: bot_username }).exists?
         if has_ai_presence

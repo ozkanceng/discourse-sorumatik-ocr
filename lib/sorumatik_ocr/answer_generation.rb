@@ -57,8 +57,8 @@ module SorumatikOcr
       raise GeminiAnswerStream::Failure.new("client_owned_source") if !fallback && client_owned_source?(source)
       generation = nil
       source.with_lock do
-        unless AiGeneration.exists?(source_post_id: source.id)
-          # Apply once for every entry point, including automatic bot jobs.
+        unless fallback || AiGeneration.exists?(source_post_id: source.id)
+          # Apply once for regular user entry points; fallbacks must never be blocked by user rate limits.
           RateLimiter.new(source.user, "sorumatik_ai_solve", SiteSetting.gemini_ai_solve_rate_limit_per_minute, 1.minute).performed!
         end
         generation = AiGeneration.find_or_create_by!(source_post_id: source.id) do |g|
@@ -75,8 +75,13 @@ module SorumatikOcr
             if (post = replies.order(:post_number).first)
               generation.update!(state: "completed", post_id: post.id, raw: post.raw, sequence: generation.sequence + 1)
             end
-          elsif generation.state == "failed" && generation.error&.dig("code") == "persistence_failed"
-            generation.update!(state: "persisting", error: nil, save_attempts: 0, sequence: generation.sequence + 1)
+          elsif generation.state == "failed"
+            if generation.error&.dig("code") == "persistence_failed"
+              generation.update!(state: "persisting", error: nil, save_attempts: 0, sequence: generation.sequence + 1)
+            elsif fallback
+              # If fallback/recover is triggered for a failed generation, retry it cleanly
+              generation.update!(state: generation.raw.present? ? "persisting" : "queued", error: nil, sequence: generation.sequence + 1)
+            end
           end
         end
       end
@@ -324,6 +329,35 @@ module SorumatikOcr
             raise GeminiAnswerStream::Failure.new("image_too_large") if bytes.bytesize > 10.megabytes
             mime = upload.extension.to_s.downcase == "png" ? "image/png" : upload.extension.to_s.downcase == "webp" ? "image/webp" : "image/jpeg"
             parts << { inline_data: { mime_type: mime, data: Base64.strict_encode64(bytes) } }
+          end
+
+          # Fallback: if post.uploads is empty, extract image URLs directly from markdown raw
+          if parts.none? { |p| p.key?(:inline_data) }
+            image_urls = post.raw.to_s.scan(/!\[.*?\]\(((?:https?:)?\/\/[^\s\)]+)\)/i).flatten
+            image_urls.each do |raw_url|
+              url = raw_url.to_s.strip
+              url = "https:#{url}" if url.start_with?("//")
+              url = "#{Discourse.base_url}#{url}" unless url.start_with?("http")
+              next unless url =~ /\.(png|jpe?g|webp)(\?|$)/i
+              ext = $1.downcase
+              ext = "jpeg" if ext == "jpg"
+              begin
+                remaining = @deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+                next if remaining <= 0
+                bytes = Timeout.timeout([remaining, 10].min) do
+                  uri = URI(url)
+                  response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: 5, read_timeout: 5) { |http| http.get(uri.request_uri) }
+                  response.is_a?(Net::HTTPSuccess) ? response.body : nil
+                end
+                if bytes && bytes.bytesize <= 10.megabytes
+                  mime = ext == "png" ? "image/png" : ext == "webp" ? "image/webp" : "image/jpeg"
+                  parts << { inline_data: { mime_type: mime, data: Base64.strict_encode64(bytes) } }
+                  break
+                end
+              rescue => img_err
+                Rails.logger.warn("[Sorumatik AI] Failed to fetch raw markdown image #{url}: #{img_err.message}")
+              end
+            end
           end
         end
         parts << { text: post.raw }

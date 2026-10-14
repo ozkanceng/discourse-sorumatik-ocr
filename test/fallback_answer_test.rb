@@ -188,4 +188,25 @@ class FallbackAnswerTest < Minitest::Test
     result = skip_caller.reply_to(post)
     assert_nil result
   end
+
+  def test_managed_ai_reply_skips_automation_bot_via_bot_method
+    post = MockPost.new(Time.now)
+    post.topic.tags = MockTagList.new(["soru-cozumu"])
+
+    skip_caller = Object.new
+    skip_caller.extend(SorumatikOcr::ManagedAiReply)
+    def skip_caller.bot_user
+      Struct.new(:username).new("sorumatik_uzman_bot")
+    end
+
+    result = skip_caller.reply_to(post)
+    assert_nil result
+  end
+
+  def test_markdown_image_regex_extracts_urls
+    raw = "Matematik sorusu\n\n![Soru görseli](https://sorumatik.co/uploads/default/original/3X/6/e/test.jpeg)"
+    urls = raw.scan(/!\[.*?\]\(((?:https?:)?\/\/[^\s\)]+)\)/i).flatten
+    assert_equal 1, urls.length
+    assert_equal "https://sorumatik.co/uploads/default/original/3X/6/e/test.jpeg", urls.first
+  end
 end

@@ -4,14 +4,16 @@ module ::Jobs
   class SorumatikRecoverAnswers < ::Jobs::Scheduled
     every 1.minute
 
+    MAX_RECOVER_ATTEMPTS = 5
+
     def execute(_args)
-      # 1. Recover stalled AiGeneration records
-      SorumatikOcr::AiGeneration.where(state: %w[queued persisting generating]).where("updated_at < ?", 2.minutes.ago).find_each do |generation|
+      # 1. Recover stalled AiGeneration records (queued/persisting/generating stuck > 95s)
+      SorumatikOcr::AiGeneration.where(state: %w[queued persisting generating]).where("updated_at < ?", 95.seconds.ago).find_each do |generation|
         if generation.state == "generating"
           generation.with_lock do
-            next unless generation.state == "generating" && generation.updated_at < 2.minutes.ago
+            next unless generation.state == "generating" && generation.updated_at < 95.seconds.ago
             generation.update!(state: "failed", sequence: generation.sequence + 1,
-                               error: { code: "worker_interrupted", message: "Yanıt üretimi kesildi.", retryable: false })
+                               error: { code: "worker_interrupted", message: "Yanıt üretimi kesildi.", retryable: true })
           end
           generation.publish!
         else
@@ -19,11 +21,48 @@ module ::Jobs
         end
       end
 
-      # 2. Recover orphaned 'soru-cozumu' topics where the client failed to post an answer after 2 minutes
+      # 2. Retry failed generations (max 5 attempts, cooldown 30s between retries)
+      recover_failed_generations!
+
+      # 3. Recover orphaned 'soru-cozumu' topics where neither client nor server posted an answer
       recover_orphaned_topics!
     end
 
     private
+
+    def recover_failed_generations!
+      SorumatikOcr::AiGeneration
+        .where(state: "failed")
+        .where("updated_at < ?", 30.seconds.ago)
+        .where("created_at > ?", 24.hours.ago)
+        .find_each do |generation|
+          attempts = (generation.metrics&.dig("recover_attempts") || 0).to_i
+          next if attempts >= MAX_RECOVER_ATTEMPTS
+
+          error_code = generation.error&.dig("code") || generation.error&.dig(:code)
+          # Don't retry non-retryable errors (e.g. missing_api_key, access_revoked)
+          retryable = generation.error&.dig("retryable") || generation.error&.dig(:retryable)
+          next if retryable == false && !%w[worker_interrupted persistence_failed generation_failed].include?(error_code)
+
+          Rails.logger.info(
+            "[Sorumatik AI] Recovering failed generation #{generation.generation_id} " \
+            "(topic ##{generation.topic_id}, attempt #{attempts + 1}/#{MAX_RECOVER_ATTEMPTS}, " \
+            "error: #{error_code})"
+          )
+
+          generation.with_lock do
+            next unless generation.state == "failed"
+            new_state = generation.raw.present? ? "persisting" : "queued"
+            generation.update!(
+              state: new_state,
+              error: nil,
+              metrics: (generation.metrics || {}).merge("recover_attempts" => attempts + 1),
+              sequence: generation.sequence + 1
+            )
+          end
+          Jobs.enqueue(:sorumatik_generate_answer, generation_id: generation.id)
+        end
+    end
 
     def recover_orphaned_topics!
       return unless SiteSetting.gemini_ai_solve_enabled
@@ -37,14 +76,14 @@ module ::Jobs
         category_ids = cat_setting.split("|").map { |id| id.strip.to_i }.reject(&:zero?)
         orphaned_topics = Topic.left_joins(:tags)
                                .where("tags.name = 'soru-cozumu' OR topics.category_id IN (?)", category_ids)
-                               .where("topics.created_at > ? AND topics.created_at < ?", 24.hours.ago, 2.minutes.ago)
+                               .where("topics.created_at > ? AND topics.created_at < ?", 24.hours.ago, 95.seconds.ago)
                                .where(posts_count: 1)
                                .where(deleted_at: nil)
                                .distinct
       else
         orphaned_topics = Topic.joins(:tags)
                                .where(tags: { name: "soru-cozumu" })
-                               .where("topics.created_at > ? AND topics.created_at < ?", 24.hours.ago, 2.minutes.ago)
+                               .where("topics.created_at > ? AND topics.created_at < ?", 24.hours.ago, 95.seconds.ago)
                                .where(posts_count: 1)
                                .where(deleted_at: nil)
       end
@@ -60,11 +99,30 @@ module ::Jobs
         gen = SorumatikOcr::AiGeneration.find_by(source_post_id: first_post.id)
         next if gen && %w[completed persisting generating].include?(gen.state)
 
-        Rails.logger.info("[Sorumatik AI] SorumatikRecoverAnswers recovering orphaned topic ##{topic.id}")
+        # Track recovery attempts per topic to prevent infinite retries
+        attempts = topic.custom_fields["sorumatik_recover_attempts"].to_i
+        next if attempts >= MAX_RECOVER_ATTEMPTS
+
+        # If generation exists and already exhausted recover_attempts via the generation path, skip
+        if gen && gen.state == "failed"
+          gen_attempts = (gen.metrics&.dig("recover_attempts") || 0).to_i
+          next if gen_attempts >= MAX_RECOVER_ATTEMPTS
+        end
+
+        topic.custom_fields["sorumatik_recover_attempts"] = attempts + 1
+        topic.save_custom_fields(true)
+
+        Rails.logger.info(
+          "[Sorumatik AI] SorumatikRecoverAnswers recovering orphaned topic ##{topic.id} " \
+          "(attempt #{attempts + 1}/#{MAX_RECOVER_ATTEMPTS})"
+        )
         begin
           SorumatikOcr::AnswerGeneration.start!(first_post, fallback: true)
         rescue StandardError => e
-          Rails.logger.warn("[Sorumatik AI] Recovery failed for topic ##{topic.id}: #{e.class} - #{e.message}")
+          Rails.logger.warn(
+            "[Sorumatik AI] Recovery failed for topic ##{topic.id} " \
+            "(attempt #{attempts + 1}/#{MAX_RECOVER_ATTEMPTS}): #{e.class} - #{e.message}"
+          )
         end
       end
     end

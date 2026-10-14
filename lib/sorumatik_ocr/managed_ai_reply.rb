@@ -13,7 +13,11 @@ module SorumatikOcr
 
       # Gracefully skip automation bot (sorumatik_uzman_bot) on mobile/AI handled topics
       # to avoid unhandled ActiveRecord::RecordNotSaved in DiscourseAi LlmAgentTriage.
-      bot = @bot_user || (respond_to?(:user) ? user : nil)
+      bot = @bot_user ||
+            (respond_to?(:bot_user) ? bot_user : nil) ||
+            @bot ||
+            (respond_to?(:bot) ? self.bot : nil) ||
+            (respond_to?(:user) ? user : nil)
       if bot && bot.username.to_s.casecmp?(suppress_bot)
         t = source_post&.topic
         if t && (AnswerGeneration.question_topic?(t) ||

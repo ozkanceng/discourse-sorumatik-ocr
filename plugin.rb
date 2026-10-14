@@ -93,10 +93,12 @@ after_initialize do
       end
     end
 
-    # When a question is created with client_edge_solve from mobile,
-    # schedule a fallback job in 95 seconds in case the client fails to complete or save the answer.
-    if post.is_first_post? && (post.custom_fields["client_edge_solve"] == "true" || post.topic&.custom_fields&.[]("client_edge_solve") == "true")
-      Jobs.enqueue_in(95.seconds, :sorumatik_fallback_answer, post_id: post.id)
+    # When a question or reply is created from mobile,
+    # let mobile stream directly to user; do NOT start server generation immediately.
+    if is_mobile
+      if post.is_first_post?
+        Jobs.enqueue_in(95.seconds, :sorumatik_fallback_answer, post_id: post.id)
+      end
       next
     end
 

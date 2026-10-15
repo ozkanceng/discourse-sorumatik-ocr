@@ -18,12 +18,16 @@ module SorumatikOcr
             @bot ||
             (respond_to?(:bot) ? self.bot : nil) ||
             (respond_to?(:user) ? user : nil)
-      if bot && bot.username.to_s.casecmp?(suppress_bot)
+      if bot && (bot.username.to_s.casecmp?(suppress_bot) || bot.username.to_s.casecmp?("sorumatik_uzman_bot"))
         t = source_post&.topic
-        if t && (AnswerGeneration.question_topic?(t) ||
-                 !t.custom_fields&.[]("ai_solve_handled").to_s.strip.empty? ||
-                 (t.respond_to?(:posts) && t.posts.respond_to?(:joins) && t.posts.joins(:user).where(users: { username: bot_username }).exists?))
-          Rails.logger.info("[Sorumatik AI] Gracefully skipping automation bot #{suppress_bot} in Playground for topic ##{t.id}") if defined?(Rails)
+        is_mobile_or_question = source_post&.custom_fields&.[]("client_edge_solve").to_s == "true" ||
+                                source_post&.custom_fields&.[]("mobile_answer_protocol").to_i >= 1 ||
+                                (t && (AnswerGeneration.question_topic?(t) ||
+                                       !t.custom_fields&.[]("client_edge_solve").to_s.strip.empty? ||
+                                       !t.custom_fields&.[]("ai_solve_handled").to_s.strip.empty? ||
+                                       (t.respond_to?(:posts) && t.posts.respond_to?(:joins) && t.posts.joins(:user).where(users: { username: bot_username }).exists?)))
+        if is_mobile_or_question
+          Rails.logger.info("[Sorumatik AI] Gracefully skipping automation bot #{bot.username} in Playground for topic ##{t&.id}") if defined?(Rails)
           return nil
         end
       end

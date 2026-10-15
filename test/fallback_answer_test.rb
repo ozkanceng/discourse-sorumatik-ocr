@@ -209,4 +209,28 @@ class FallbackAnswerTest < Minitest::Test
     assert_equal 1, urls.length
     assert_equal "https://sorumatik.co/uploads/default/original/3X/6/e/test.jpeg", urls.first
   end
+
+  def test_ai_generation_snapshot_with_nil_raw_does_not_raise_type_error
+    mock_gen = Object.new
+    def mock_gen.raw; nil; end
+    def mock_gen.terminal?; false; end
+    def mock_gen.generation_id; "test-gen-id"; end
+    def mock_gen.topic_id; 123; end
+    def mock_gen.source_post_id; 456; end
+    def mock_gen.sequence; 1; end
+    def mock_gen.state; "queued"; end
+    def mock_gen.post_id; nil; end
+    def mock_gen.post; nil; end
+    def mock_gen.error; nil; end
+    def mock_gen.user_id; 1; end
+
+    content_sha256 = (mock_gen.raw && !mock_gen.raw.empty?) ? Digest::SHA256.hexdigest(mock_gen.raw) : nil
+    assert_nil content_sha256
+  end
+
+  def test_ai_generation_snapshot_with_present_raw_calculates_sha256
+    raw = "Soru cevabı burada yer almaktadır."
+    content_sha256 = (raw && !raw.empty?) ? Digest::SHA256.hexdigest(raw) : nil
+    assert_equal Digest::SHA256.hexdigest(raw), content_sha256
+  end
 end

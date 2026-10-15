@@ -26,7 +26,7 @@ module SorumatikOcr
         sequence: sequence,
         state: state,
         raw: raw,
-        content_sha256: Digest::SHA256.hexdigest(raw),
+        content_sha256: (raw && !raw.empty?) ? Digest::SHA256.hexdigest(raw) : nil,
         post_id: post_id,
         post_number: post&.post_number,
         done: terminal?,
@@ -43,11 +43,11 @@ module SorumatikOcr
         snapshot,
         user_ids: [user_id],
         max_backlog_size: 2,
-        max_backlog_age: 10.minutes,
+        max_backlog_age: 10.minutes.to_i,
       )
     rescue StandardError => e
       # Durable status remains readable even if MessageBus is unavailable.
-      Rails.logger.warn("sorumatik_ai publish_failed generation_id=#{generation_id} error=#{e.class}")
+      Rails.logger.warn("sorumatik_ai publish_failed generation_id=#{generation_id} error=#{e.class} message=#{e.message}")
     end
   end
 end

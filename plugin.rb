@@ -2,7 +2,7 @@
 
 # name: discourse-sorumatik-ocr
 # about: Sorumatik için ultra hızlı Google Gemini 2.5 Flash-Lite tabanlı Matematik/Sınav OCR eklentisi.
-# version: 1.2.0
+# version: 1.2.1
 # authors: Sorumatik
 # url: https://github.com/ozkanceng/discourse-sorumatik-ocr
 

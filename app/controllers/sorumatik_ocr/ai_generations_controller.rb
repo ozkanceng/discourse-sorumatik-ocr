@@ -18,7 +18,7 @@ module SorumatikOcr
       unless SiteSetting.gemini_ai_solve_enabled
         return render_json_error("AI solve is disabled", status: 503)
       end
-      generation = AnswerGeneration.start!(source)
+      generation = AnswerGeneration.start!(source, fallback: true)
       render json: generation.snapshot, status: generation.terminal? ? 200 : 202
     rescue GeminiAnswerStream::Failure => e
       render json: { success: false, error: e.code }, status: 409

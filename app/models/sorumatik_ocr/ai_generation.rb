@@ -17,6 +17,7 @@ module SorumatikOcr
     end
 
     def snapshot
+      cleaned_raw = raw.to_s
       {
         protocol: 2,
         generation_id: generation_id,
@@ -25,15 +26,14 @@ module SorumatikOcr
         channel: "/sorumatik/ai-answer/#{source_post_id}",
         sequence: sequence,
         state: state,
-        raw: raw,
-        content_sha256: (raw && !raw.empty?) ? Digest::SHA256.hexdigest(raw) : nil,
+        raw: cleaned_raw,
+        content_sha256: Digest::SHA256.hexdigest(cleaned_raw),
         post_id: post_id,
         post_number: post&.post_number,
         done: terminal?,
         error: error,
         # Disabling delivery changes the transport, never the generation owner.
-        stream_enabled: SiteSetting.sorumatik_ai_generation_streaming_enabled &&
-          user_id % 100 < SiteSetting.sorumatik_ai_generation_streaming_percent,
+        stream_enabled: SiteSetting.sorumatik_ai_generation_streaming_enabled,
       }
     end
 

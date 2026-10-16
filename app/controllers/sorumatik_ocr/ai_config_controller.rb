@@ -34,15 +34,14 @@ module SorumatikOcr
       tools_enabled = SiteSetting.respond_to?(:gemini_ai_tools_enabled) ? SiteSetting.gemini_ai_tools_enabled : true
       enabled = ocr_enabled && tools_enabled
 
-      authorized = current_user.present? || request.headers["User-Api-Key"].present? || request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4"
-      api_key = (authorized && enabled) ? resolve_api_key : ""
-
+      # SECURITY: İstemciye asla Gemini API anahtarı sızdırılmaz.
+      # İstemciler her zaman sunucu proxy (/sorumatik/ai/generate, /sorumatik/ocr) üzerinden çalışmalıdır.
       render json: {
         success: true,
         mobile_answer_protocol: 2,
         enabled: !!enabled,
         save_solution_enabled: true,
-        proxy: api_key.blank?,
+        proxy: true,
         model: model,
         solve_model: solve_model,
         solve_system_prompt: solve_system_prompt,
@@ -50,7 +49,7 @@ module SorumatikOcr
         ocr_model: ocr_model,
         document_quiz_model: document_quiz_model,
         tts_model: tts_model,
-        api_key: api_key
+        api_key: ""
       }
     rescue => err
       Rails.logger.error("[Sorumatik AI Config] Error: #{err.message}")

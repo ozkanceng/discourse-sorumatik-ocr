@@ -6,6 +6,10 @@ plugins:
     default: ""
     secret: true
     client: false
+  sorumatik_ocr_api_key:
+    default: ""
+    secret: true
+    client: false
   gemini_ocr_rate_limit_per_minute:
     default: 30
     client: false

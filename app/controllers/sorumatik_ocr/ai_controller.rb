@@ -401,7 +401,7 @@ module SorumatikOcr
     end
 
     def resolve_api_key
-      (SiteSetting.respond_to?(:gemini_ocr_api_key) && SiteSetting.gemini_ocr_api_key.presence) || ENV["GEMINI_API_KEY"]
+      SorumatikOcr.resolve_api_key
     end
 
     def resolve_max_output_tokens(model)
@@ -416,13 +416,16 @@ module SorumatikOcr
     end
 
     def call_gemini_sync(model, api_key, payload)
-      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model}:generateContent?key=#{api_key}")
+      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model}:generateContent")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
       http.open_timeout = 5
       http.read_timeout = 60
 
-      req = Net::HTTP::Post.new(uri.request_uri, { "Content-Type" => "application/json" })
+      req = Net::HTTP::Post.new(uri.request_uri, {
+        "Content-Type" => "application/json",
+        "x-goog-api-key" => api_key
+      })
       req.body = payload.to_json
 
       res = http.request(req)

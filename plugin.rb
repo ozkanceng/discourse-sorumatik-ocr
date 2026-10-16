@@ -12,6 +12,15 @@ after_initialize do
   module ::SorumatikOcr
     PLUGIN_NAME = "discourse-sorumatik-ocr"
 
+    def self.resolve_api_key
+      key = (SiteSetting.respond_to?(:sorumatik_ocr_api_key) && SiteSetting.sorumatik_ocr_api_key.presence) ||
+            (SiteSetting.respond_to?(:gemini_ocr_api_key) && SiteSetting.gemini_ocr_api_key.presence) ||
+            (SiteSetting.respond_to?(:blackboard_gemini_api_key) && SiteSetting.blackboard_gemini_api_key.presence) ||
+            ENV["GEMINI_API_KEY"] ||
+            ENV["DISCOURSE_GEMINI_OCR_API_KEY"]
+      key.to_s.strip
+    end
+
     class Engine < ::Rails::Engine
       engine_name PLUGIN_NAME
       isolate_namespace SorumatikOcr

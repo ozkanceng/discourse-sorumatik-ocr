@@ -1,7 +1,8 @@
 tr_TR:
   site_settings:
     gemini_ocr_enabled: "[Sorumatik OCR & AI] Eklentiyi ve OCR uç noktasını (/sorumatik/ocr) aktif et"
-    gemini_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Gizli Anahtarı (Tüm OCR ve Yapay Zeka işlemleri için kullanılır)"
+    gemini_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Gizli Anahtarı (Tüm OCR ve Yapay Zeka işlemleri için sunucu tarafında güvenle kullanılır)"
+    sorumatik_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Anahtarı (gemini_ocr_api_key ile eşdeğer alternatif alan)"
     gemini_ocr_rate_limit_per_minute: "[Sorumatik OCR & AI] Kullanıcı başına dakikalık maksimum OCR istek sınırı (varsayılan: 30)"
     gemini_ocr_model: "[Sorumatik OCR & AI] OCR görsel soru okuma için kullanılacak Google Gemini modeli (varsayılan: gemini-2.5-flash-lite)"
     gemini_ai_solve_enabled: "[Sorumatik OCR & AI] Sorumatik doğrudan yapay zeka soru çözümünü aktif et"

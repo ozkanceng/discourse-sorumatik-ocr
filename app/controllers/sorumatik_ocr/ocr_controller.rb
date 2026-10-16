@@ -62,8 +62,8 @@ module SorumatikOcr
         RateLimiter.new(nil, "sorumatik_ocr_#{request.remote_ip}", limit, 1.minute).performed!
       end
 
-      # 4. Resolve API key (from SiteSetting or ENV)
-      api_key = SiteSetting.gemini_ocr_api_key.presence || ENV["GEMINI_API_KEY"]
+      # 4. Resolve API key securely (from SiteSetting or ENV)
+      api_key = SorumatikOcr.resolve_api_key
       if api_key.blank?
         Rails.logger.error("[Sorumatik OCR] Gemini API key is missing in SiteSetting / ENV.")
         return render_json_error(I18n.t("sorumatik_ocr.api_key_missing"), status: 500)
@@ -153,7 +153,7 @@ module SorumatikOcr
                          SiteSetting.gemini_ocr_model.presence || "gemini-2.5-flash-lite"
                        end
 
-      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{selected_model}:generateContent?key=#{api_key}")
+      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{selected_model}:generateContent")
 
       payload = {
         contents: [
@@ -178,7 +178,10 @@ module SorumatikOcr
       http.open_timeout = 5
       http.read_timeout = 25
 
-      req = Net::HTTP::Post.new(uri.request_uri, { "Content-Type" => "application/json" })
+      req = Net::HTTP::Post.new(uri.request_uri, {
+        "Content-Type" => "application/json",
+        "x-goog-api-key" => api_key
+      })
       req.body = payload.to_json
 
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)

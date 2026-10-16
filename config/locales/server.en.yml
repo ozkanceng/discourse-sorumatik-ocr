@@ -1,7 +1,8 @@
 en:
   site_settings:
     gemini_ocr_enabled: "[Sorumatik OCR & AI] Enable plugin and OCR endpoint (/sorumatik/ocr)"
-    gemini_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Secret Key (used for all OCR and AI operations)"
+    gemini_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Secret Key (securely used server-side for OCR and AI operations)"
+    sorumatik_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Key (alternative alias for gemini_ocr_api_key)"
     gemini_ocr_rate_limit_per_minute: "[Sorumatik OCR & AI] Maximum OCR requests per user per minute (default: 30)"
     gemini_ocr_model: "[Sorumatik OCR & AI] Google Gemini model for OCR question recognition (default: gemini-2.5-flash-lite)"
     gemini_ai_solve_enabled: "[Sorumatik OCR & AI] Enable Sorumatik direct AI streaming question solve endpoint"

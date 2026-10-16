@@ -59,7 +59,7 @@ module SorumatikOcr
     private
 
     def resolve_api_key
-      (SiteSetting.respond_to?(:gemini_ocr_api_key) && SiteSetting.gemini_ocr_api_key.presence) || ENV["GEMINI_API_KEY"]
+      SorumatikOcr.resolve_api_key
     end
 
     # POST /sorumatik/save-study

@@ -178,7 +178,7 @@ module SorumatikOcr
       raise GeminiAnswerStream::Failure.new("access_revoked") unless source && source.deleted_at.nil? && Guardian.new(source.user).can_see?(source.topic)
       is_fallback = @generation.metrics&.[]("fallback") == true
       raise GeminiAnswerStream::Failure.new("client_owned_source") if !is_fallback && self.class.client_owned_source?(source)
-      key = SiteSetting.gemini_ocr_api_key.presence || ENV["GEMINI_API_KEY"]
+      key = SorumatikOcr.resolve_api_key
       raise GeminiAnswerStream::Failure.new("missing_api_key") if key.blank?
       model = SiteSetting.gemini_ai_solve_model
       prompt = SiteSetting.gemini_ai_solve_system_prompt

@@ -168,14 +168,27 @@ after_initialize do
 
   # Bot kuralları ve mükerrer bot cevabı engelleme
   validate(:post, :validate_sorumatik_bot_reply) do
+    suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
     bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
-    is_bot_user = user.present? && user.username.to_s.casecmp?(bot_username)
+    is_bot_user = user.present? && (user.username.to_s.casecmp?(bot_username) || user.username.to_s.casecmp?(suppress_bot))
 
     # Botlar hiçbir zaman forumda birinci post (yeni konu açılışı) olamaz
     if is_bot_user && (post_number == 1 || is_first_post?)
       Rails.logger.warn("[Sorumatik AI] Blocked bot #{user.username} from opening a new topic")
       errors.add(:base, "Bot kullanıcıları doğrudan konu açamaz.")
       next
+    end
+
+    if user.present? && user.username.to_s.casecmp?(suppress_bot)
+      if topic.present?
+        has_ai_presence = SorumatikOcr::AnswerGeneration.question_topic?(topic) ||
+                          topic.custom_fields["ai_solve_handled"].present? ||
+                          topic.posts.joins(:user).where(users: { username: bot_username }).exists?
+        if has_ai_presence
+          Rails.logger.info("[Sorumatik AI] Suppressing automation bot #{suppress_bot} for topic ##{topic_id}")
+          errors.add(:base, "Bu konu mobil uygulama çözümü içerdiği için otomasyon botu yanıtı engellendi.")
+        end
+      end
     end
 
     # Yapay zeka aracı PM'lerinde (ai_module_handled) mükerrer 2. cevap eklemesini engelle
@@ -204,14 +217,27 @@ after_initialize do
   end
 
   on(:before_create_post) do |post|
+    suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
     bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
     t = post.topic
-    is_bot = post.user.present? && post.user.username.to_s.casecmp?(bot_username)
+    is_bot = post.user.present? && (post.user.username.to_s.casecmp?(bot_username) || post.user.username.to_s.casecmp?(suppress_bot))
 
     # Botlar yeni konu açamaz
     if is_bot && (post.is_first_post? || (t.present? && t.posts_count.to_i == 0))
       Rails.logger.warn("[Sorumatik AI] Halting bot #{post.user.username} from creating topic ##{t&.id}")
       throw(:abort)
+    end
+
+    if post.user.present? && post.user.username.to_s.casecmp?(suppress_bot)
+      if t.present?
+        has_ai_presence = SorumatikOcr::AnswerGeneration.question_topic?(t) ||
+                          t.custom_fields["ai_solve_handled"].present? ||
+                          t.posts.joins(:user).where(users: { username: bot_username }).exists?
+        if has_ai_presence
+          Rails.logger.info("[Sorumatik AI] Halting automation bot #{suppress_bot} post creation on topic ##{t.id}")
+          throw(:abort)
+        end
+      end
     end
 
     # Yapay zeka aracı PM'lerinde botun ikinci kez tetiklenmesini engelle

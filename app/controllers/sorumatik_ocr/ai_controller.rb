@@ -55,8 +55,9 @@ module SorumatikOcr
       media_parts = params[:media_parts] || params[:mediaParts] || []
       is_json = params[:is_json].to_s == "true" || params[:isJson].to_s == "true"
       thinking_level = params[:thinking_level].presence || params[:thinkingLevel].presence
+      client_contents = normalize_client_contents(params[:contents])
 
-      if prompt.blank? && media_parts.blank?
+      if prompt.blank? && media_parts.blank? && client_contents.blank?
         return render_json_error("Prompt veya medya gereklidir", status: 400)
       end
 
@@ -95,7 +96,7 @@ module SorumatikOcr
       end
 
       payload = {
-        contents: [{ parts: parts }],
+        contents: client_contents.presence || [{ parts: parts }],
         generationConfig: generation_config
       }
 
@@ -362,6 +363,41 @@ module SorumatikOcr
     end
 
     private
+
+    MAX_CLIENT_CONTENTS = 24
+    MAX_CLIENT_PART_BYTES = 12 * 1024 * 1024
+
+    # Multi-turn question solving sends the reconstructed topic history. Roles are
+    # validated here so a client cannot fabricate a "model" turn to steer answers.
+    def normalize_client_contents(raw_contents)
+      contents = raw_contents.is_a?(Array) ? raw_contents.first(MAX_CLIENT_CONTENTS) : []
+      normalized = []
+      contents.each do |turn|
+        next unless turn.is_a?(Hash)
+        parts = turn["parts"] || turn[:parts]
+        next unless parts.is_a?(Array)
+        role = (turn["role"] || turn[:role]).to_s
+        next unless %w[user model].include?(role)
+        cleaned = []
+        parts.each do |part|
+          next unless part.is_a?(Hash)
+          data = part["inlineData"] || part[:inlineData] || part["inline_data"] || part[:inline_data]
+          if data.is_a?(Hash)
+            encoded = data["data"] || data[:data]
+            next if encoded.blank? || encoded.length > MAX_CLIENT_PART_BYTES
+            mime = data["mimeType"] || data[:mimeType] || data["mime_type"] || data[:mime_type] || "image/jpeg"
+            cleaned << { inline_data: { mime_type: mime, data: encoded } }
+          else
+            text = part["text"] || part[:text]
+            next if text.blank?
+            cleaned << { text: text }
+          end
+        end
+        next if cleaned.blank?
+        normalized << { role: role, parts: cleaned }
+      end
+      normalized
+    end
 
     def ensure_authorized!
       unless current_user.present? || request.headers["User-Api-Key"].present? || request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4"

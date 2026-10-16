@@ -44,7 +44,8 @@ module SorumatikOcr
         provider_completed: respond_to?(:provider_completed) ? !!provider_completed : false,
         error: error,
         # Disabling delivery changes the transport, never the generation owner.
-        stream_enabled: SiteSetting.sorumatik_ai_generation_streaming_enabled,
+        stream_enabled: SiteSetting.sorumatik_ai_generation_streaming_enabled &&
+          (!SiteSetting.respond_to?(:sorumatik_ai_generation_streaming_percent) || SiteSetting.sorumatik_ai_generation_streaming_percent.to_i >= 100 || (user_id.to_i % 100 < SiteSetting.sorumatik_ai_generation_streaming_percent.to_i)),
       }
     end
 

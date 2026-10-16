@@ -38,7 +38,8 @@ module SorumatikOcr
       # İstemciler her zaman sunucu proxy (/sorumatik/ai/generate, /sorumatik/ocr) üzerinden çalışmalıdır.
       render json: {
         success: true,
-        mobile_answer_protocol: 2,
+        mobile_answer_protocol: 3,
+        server_generation: true,
         enabled: !!enabled,
         save_solution_enabled: true,
         proxy: true,

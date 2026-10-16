@@ -8,6 +8,21 @@ module SorumatikOcr
     skip_before_action :redirect_to_login_if_required
     before_action :ensure_logged_in
 
+    def active
+      recent_generations = AiGeneration.where(user_id: current_user.id)
+        .where("state IN ('queued', 'generating', 'persisting') OR (state = 'completed' AND updated_at > ?)", 10.minutes.ago)
+        .order(updated_at: :desc)
+        .limit(10)
+
+      snapshots = recent_generations.map do |gen|
+        source = gen.source_post
+        next nil if source.nil? || source.deleted_at.present? || !guardian.can_see?(source.topic)
+        gen.snapshot
+      end.compact
+
+      render json: { success: true, generations: snapshots }
+    end
+
     def create
       source = Post.find_by(id: params[:source_post_id])
       source ||= Topic.find_by(id: params[:topic_id])&.first_post if params[:source_post_id].blank?

@@ -2,7 +2,7 @@
 
 # name: discourse-sorumatik-ocr
 # about: Sorumatik için ultra hızlı Google Gemini 2.5 Flash-Lite tabanlı Matematik/Sınav OCR eklentisi.
-# version: 1.1.0
+# version: 1.2.0
 # authors: Sorumatik
 # url: https://github.com/ozkanceng/discourse-sorumatik-ocr
 
@@ -27,20 +27,17 @@ after_initialize do
     end
   end
 
-  # Permit only the two ownership fields, never arbitrary post custom fields.
+  # Permit only the ownership fields, never arbitrary post custom fields.
   %w[client_edge_solve mobile_answer_protocol].each do |name|
     Post.plugin_permitted_create_params[name] = { type: :string, plugin: self }
   end
   module ::SorumatikOcr::MobileSourceFields
     def setup_post
       super
-      if @opts[:client_edge_solve].to_s == "true" && @opts[:mobile_answer_protocol].to_i == 2
-        @post.custom_fields["client_edge_solve"] = "true"
-        @post.custom_fields["mobile_answer_protocol"] = "2"
-        if @post.topic.present?
-          @post.topic.custom_fields["client_edge_solve"] = "true"
-          @post.topic.custom_fields["mobile_answer_protocol"] = "2"
-        end
+      proto = @opts[:mobile_answer_protocol].to_i
+      if proto >= 2 || @opts[:client_edge_solve].to_s == "true"
+        @post.custom_fields["client_edge_solve"] = @opts[:client_edge_solve].to_s
+        @post.custom_fields["mobile_answer_protocol"] = proto > 0 ? proto.to_s : "2"
       end
     end
   end
@@ -71,7 +68,8 @@ after_initialize do
   # Recheck visibility at delivery time, including replay of the bus backlog.
   MessageBus.register_client_message_filter("/sorumatik/ai-answer/") do |message|
     data = message.data
-    if data.is_a?(Hash) && (data["protocol"] || data[:protocol]) == 2
+    proto = data.is_a?(Hash) ? (data["protocol"] || data[:protocol]).to_i : 0
+    if proto >= 2
       ActiveRecord::Base.connection_pool.with_connection do
         id = data["generation_id"] || data[:generation_id]
         generation = SorumatikOcr::AiGeneration.find_by(generation_id: id)
@@ -85,33 +83,30 @@ after_initialize do
   end
 
   on(:post_created) do |post, _opts|
-    is_mobile = post.custom_fields["client_edge_solve"] == "true" ||
-                post.topic&.custom_fields&.[]("client_edge_solve") == "true" ||
-                (_opts.is_a?(Hash) && (_opts[:client_edge_solve].to_s == "true" || _opts[:mobile_answer_protocol].to_i >= 1))
+    proto = post.custom_fields["mobile_answer_protocol"].to_i
+    proto = _opts[:mobile_answer_protocol].to_i if proto == 0 && _opts.is_a?(Hash)
 
-    # Mobilden açılan konularda kullanıcı yetkisinden (TL0) bağımsız olarak sistem yetkisiyle soru-cozumu etiketini garantiye al
-    if post.is_first_post? && is_mobile && post.topic.present?
+    # Sorumatik AI tarafından yönetilen konularda sistem yetkisiyle soru-cozumu etiketini ekle
+    if post.is_first_post? && post.topic.present? && (proto >= 2 || post.custom_fields["client_edge_solve"] == "true" || SorumatikOcr::AnswerGeneration.managed_source?(post))
       begin
         if defined?(DiscourseTagging)
           DiscourseTagging.tag_topic_by_names(post.topic, Discourse.system_user.guardian, ["soru-cozumu"], append: true)
         end
-        post.topic.custom_fields["client_edge_solve"] = "true"
-        post.topic.save_custom_fields(true)
       rescue => tag_err
-        Rails.logger.warn("[Sorumatik AI] Failed to auto-tag mobile topic: #{tag_err.message}")
+        Rails.logger.warn("[Sorumatik AI] Failed to auto-tag question topic: #{tag_err.message}")
       end
     end
 
-    # When a question or reply is created from mobile,
-    # let mobile stream directly to user; do NOT start server generation immediately.
-    if is_mobile
+    # Eski Protokol 2 cihaz üstü istemci akışı (yedek 95 saniye fallback):
+    if proto == 2 && post.custom_fields["client_edge_solve"] == "true"
       if post.is_first_post?
         Jobs.enqueue_in(95.seconds, :sorumatik_fallback_answer, post_id: post.id)
       end
       next
     end
 
-    # Versioned mobile ownership is checked before any automatic generation.
+    # Protokol 3 (ve web akışı):
+    # Sunucu üretimi doğrudan ve anında Sidekiq kuyruğuna alınır. 95 saniye beklenmez!
     next unless SorumatikOcr::AnswerGeneration.managed_source?(post)
 
     begin
@@ -122,14 +117,11 @@ after_initialize do
   end
 
   add_to_serializer(:topic_view, :sorumatik_pending_generation) do
-    if scope.user
-      generation = SorumatikOcr::AiGeneration.where(topic_id: object.topic.id, user_id: scope.user.id)
-        .order(created_at: :desc, id: :desc).first
-      # An earlier failed answer must not reappear over a newer completed one.
-      source = generation&.source_post
-      if generation && generation.state != "completed" && source && source.deleted_at.nil? && scope.can_see?(source)
-        { generation_id: generation.generation_id, source_post_id: generation.source_post_id }
-      end
+    generation = SorumatikOcr::AiGeneration.where(topic_id: object.topic.id)
+      .order(created_at: :desc, id: :desc).first
+    source = generation&.source_post
+    if generation && generation.state != "completed" && source && source.deleted_at.nil? && scope.can_see?(source)
+      { generation_id: generation.generation_id, source_post_id: generation.source_post_id }
     end
   end
 
@@ -160,9 +152,10 @@ after_initialize do
     post "/ai/solve" => "ai#solve"
     post "/save-study" => "ai_config#save_study"
     post "/save-solution" => "ai_config#save_solution"
+    get  "/ai-generations/active" => "ai_generations#active"
     post "/ai-generations" => "ai_generations#create"
-    get "/ai-generations/by-source/:source_post_id" => "ai_generations#by_source"
-    get "/ai-generations/:id" => "ai_generations#show"
+    get  "/ai-generations/by-source/:source_post_id" => "ai_generations#by_source"
+    get  "/ai-generations/:id" => "ai_generations#show"
     post "/study-rooms/:id/heartbeat" => "study_rooms#heartbeat"
     post "/study-rooms/:id/leave"     => "study_rooms#leave"
     post "/study-rooms/:id/cheer"     => "study_rooms#cheer"
@@ -173,11 +166,10 @@ after_initialize do
     mount ::SorumatikOcr::Engine, at: "/sorumatik"
   end
 
-  # Mobilden sorulan konularda web otomasyon botunun (@sorumatik_uzman_bot) ve mükerrer @sorumatik_ai yanıtlarının engellenmesi
-  validate(:post, :validate_sorumatik_automation_suppression) do
-    suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
+  # Bot kuralları ve mükerrer bot cevabı engelleme
+  validate(:post, :validate_sorumatik_bot_reply) do
     bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
-    is_bot_user = user.present? && (user.username.to_s.casecmp?(bot_username) || user.username.to_s.casecmp?(suppress_bot))
+    is_bot_user = user.present? && user.username.to_s.casecmp?(bot_username)
 
     # Botlar hiçbir zaman forumda birinci post (yeni konu açılışı) olamaz
     if is_bot_user && (post_number == 1 || is_first_post?)
@@ -186,19 +178,7 @@ after_initialize do
       next
     end
 
-    if user.present? && user.username.to_s.casecmp?(suppress_bot)
-      if topic.present?
-        has_ai_presence = SorumatikOcr::AnswerGeneration.question_topic?(topic) ||
-                          topic.custom_fields["ai_solve_handled"].present? ||
-                          topic.posts.joins(:user).where(users: { username: bot_username }).exists?
-        if has_ai_presence
-          Rails.logger.info("[Sorumatik AI] Suppressing automation bot #{suppress_bot} for topic ##{topic_id}")
-          errors.add(:base, "Bu konu mobil uygulama çözümü içerdiği için otomasyon botu yanıtı engellendi.")
-        end
-      end
-    end
-
-    # Yapay zeka aracı PM'lerinde (ai_module_handled) Discourse AI botunun mükerrer 2. cevap eklemesini engelle
+    # Yapay zeka aracı PM'lerinde (ai_module_handled) mükerrer 2. cevap eklemesini engelle
     if topic.present? && topic.custom_fields["ai_module_handled"] == "true"
       if is_bot_user
         if topic.posts.where(user_id: user.id).where.not(id: id).exists?
@@ -209,7 +189,7 @@ after_initialize do
     end
 
     # Genel Mükerrer Bot Cevabı Koruması:
-    # Herhangi bir kullanıcı mesajından sonra birden fazla bot cevabı (discourse-ai + discourse-sorumatik-ocr) üretilmesini engelle
+    # Herhangi bir kullanıcı mesajından sonra birden fazla bot cevabı üretilmesini engelle
     if is_bot_user && topic.present? && topic.custom_fields["ai_module_handled"] != "true"
       last_user_post = topic.posts.where.not(user_id: user.id).order(:post_number).last
       if last_user_post.present?
@@ -224,27 +204,14 @@ after_initialize do
   end
 
   on(:before_create_post) do |post|
-    suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
     bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
     t = post.topic
-    is_bot = post.user.present? && (post.user.username.to_s.casecmp?(bot_username) || post.user.username.to_s.casecmp?(suppress_bot))
+    is_bot = post.user.present? && post.user.username.to_s.casecmp?(bot_username)
 
     # Botlar yeni konu açamaz
     if is_bot && (post.is_first_post? || (t.present? && t.posts_count.to_i == 0))
       Rails.logger.warn("[Sorumatik AI] Halting bot #{post.user.username} from creating topic ##{t&.id}")
       throw(:abort)
-    end
-
-    if post.user.present? && post.user.username.to_s.casecmp?(suppress_bot)
-      if t.present?
-        has_ai_presence = SorumatikOcr::AnswerGeneration.question_topic?(t) ||
-                          t.custom_fields["ai_solve_handled"].present? ||
-                          t.posts.joins(:user).where(users: { username: bot_username }).exists?
-        if has_ai_presence
-          Rails.logger.info("[Sorumatik AI] Halting automation bot #{suppress_bot} post creation on topic ##{t.id}")
-          throw(:abort)
-        end
-      end
     end
 
     # Yapay zeka aracı PM'lerinde botun ikinci kez tetiklenmesini engelle
@@ -259,7 +226,7 @@ after_initialize do
     end
 
     # Genel Mükerrer Bot Cevabı Koruması:
-    # Herhangi bir kullanıcı mesajından sonra birden fazla bot cevabı (discourse-ai + discourse-sorumatik-ocr) üretilmesini engelle
+    # Herhangi bir kullanıcı mesajından sonra birden fazla bot cevabı üretilmesini engelle
     if is_bot && t.present? && t.custom_fields["ai_module_handled"] != "true"
       last_user_post = t.posts.where.not(user_id: post.user_id).order(:post_number).last
       if last_user_post.present?

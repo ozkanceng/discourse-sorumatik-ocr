@@ -148,11 +148,13 @@ class FallbackAnswerTest < Minitest::Test
     assert_equal true, SorumatikOcr::AnswerGeneration.question_topic?(topic)
   end
 
-  def test_non_question_topic_without_tag_or_flag_is_false
+  def test_non_question_topic_without_tag_or_flag_is_false_when_categories_restricted
     regular_topic = MockTopic.new
     regular_topic.tags = MockTagList.new([])
-    SiteSetting.gemini_ai_solve_category_ids = ""
+    regular_topic.category_id = 999
+    SiteSetting.gemini_ai_solve_category_ids = "163|162"
     assert_equal false, SorumatikOcr::AnswerGeneration.question_topic?(regular_topic)
+    SiteSetting.gemini_ai_solve_category_ids = ""
   end
 
   def test_question_topic_respects_explicit_category_setting
@@ -232,5 +234,50 @@ class FallbackAnswerTest < Minitest::Test
     raw = "Soru cevabı burada yer almaktadır."
     content_sha256 = (raw && !raw.empty?) ? Digest::SHA256.hexdigest(raw) : nil
     assert_equal Digest::SHA256.hexdigest(raw), content_sha256
+  end
+
+  def test_web_question_is_question_topic_when_categories_empty
+    original = SiteSetting.gemini_ai_solve_category_ids
+    SiteSetting.gemini_ai_solve_category_ids = ""
+
+    web_post = MockPost.new(Time.now)
+    web_post.topic.tags = MockTagList.new([]) # No tags!
+    web_post.topic.category_id = 6 # Any category like Edat sorusu
+    web_post.custom_fields = {} # No mobile flags!
+
+    assert_equal true, SorumatikOcr::AnswerGeneration.question_topic?(web_post.topic)
+    assert_equal true, SorumatikOcr::AnswerGeneration.managed_source?(web_post)
+  ensure
+    SiteSetting.gemini_ai_solve_category_ids = original
+  end
+
+  def test_web_question_in_disallowed_category_when_categories_configured
+    original = SiteSetting.gemini_ai_solve_category_ids
+    SiteSetting.gemini_ai_solve_category_ids = "163|162"
+
+    web_post = MockPost.new(Time.now)
+    web_post.topic.tags = MockTagList.new([])
+    web_post.topic.category_id = 999 # Not in allowed list
+
+    assert_equal false, SorumatikOcr::AnswerGeneration.question_topic?(web_post.topic)
+    assert_equal false, SorumatikOcr::AnswerGeneration.managed_source?(web_post)
+
+    web_post.topic.category_id = 163 # In allowed list
+    assert_equal true, SorumatikOcr::AnswerGeneration.question_topic?(web_post.topic)
+    assert_equal true, SorumatikOcr::AnswerGeneration.managed_source?(web_post)
+  ensure
+    SiteSetting.gemini_ai_solve_category_ids = original
+  end
+
+  def test_private_message_is_not_auto_question_topic
+    original = SiteSetting.gemini_ai_solve_category_ids
+    SiteSetting.gemini_ai_solve_category_ids = ""
+
+    pm_topic = MockTopic.new
+    def pm_topic.private_message?; true; end
+
+    assert_equal false, SorumatikOcr::AnswerGeneration.question_topic?(pm_topic)
+  ensure
+    SiteSetting.gemini_ai_solve_category_ids = original
   end
 end

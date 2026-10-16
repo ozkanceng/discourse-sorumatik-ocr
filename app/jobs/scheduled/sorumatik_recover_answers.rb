@@ -81,8 +81,7 @@ module ::Jobs
                                .where(deleted_at: nil)
                                .distinct
       else
-        orphaned_topics = Topic.joins(:tags)
-                               .where(tags: { name: "soru-cozumu" })
+        orphaned_topics = Topic.where(archetype: "regular")
                                .where("topics.created_at > ? AND topics.created_at < ?", 24.hours.ago, 95.seconds.ago)
                                .where(posts_count: 1)
                                .where(deleted_at: nil)

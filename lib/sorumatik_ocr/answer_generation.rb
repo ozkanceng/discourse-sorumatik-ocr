@@ -73,8 +73,11 @@ module SorumatikOcr
       generation = nil
       source.with_lock do
         unless fallback || AiGeneration.exists?(source_post_id: source.id)
-          # Apply once for regular user entry points; fallbacks must never be blocked by user rate limits.
-          RateLimiter.new(source.user, "sorumatik_ai_solve", SiteSetting.gemini_ai_solve_rate_limit_per_minute, 1.minute).performed!
+          # Apply once for regular web entry points; fallbacks and mobile app requests must never be blocked by rate limits.
+          is_mobile = source.custom_fields["client_edge_solve"] == "true" || source.custom_fields["mobile_answer_protocol"].to_i >= 2
+          unless is_mobile
+            RateLimiter.new(source.user, "sorumatik_ai_solve", SiteSetting.gemini_ai_solve_rate_limit_per_minute, 1.minute).performed!
+          end
         end
         generation = AiGeneration.find_or_create_by!(source_post_id: source.id) do |g|
           g.topic_id = source.topic_id

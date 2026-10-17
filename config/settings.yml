@@ -26,7 +26,7 @@ plugins:
     default: "sorumatik_ai"
     client: false
   gemini_ai_solve_rate_limit_per_minute:
-    default: 15
+    default: 120
     client: false
   gemini_ai_solve_thinking_level:
     default: "default"
@@ -58,7 +58,7 @@ plugins:
     max: 100
     client: false
   gemini_ai_rate_limit_per_minute:
-    default: 30
+    default: 120
     client: false
   gemini_legacy_client_fallback:
     default: false

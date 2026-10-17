@@ -2,7 +2,7 @@
 
 # name: discourse-sorumatik-ocr
 # about: Sorumatik için ultra hızlı Google Gemini 2.5 Flash-Lite tabanlı Matematik/Sınav OCR eklentisi.
-# version: 1.2.1
+# version: 1.2.2
 # authors: Sorumatik
 # url: https://github.com/ozkanceng/discourse-sorumatik-ocr
 
@@ -32,6 +32,18 @@ after_initialize do
     Post.plugin_permitted_create_params[name] = { type: :string, plugin: self }
   end
   module ::SorumatikOcr::MobileSourceFields
+    def initialize(user, opts)
+      proto = (opts[:mobile_answer_protocol] || opts["mobile_answer_protocol"]).to_i
+      is_mobile = proto >= 2 || (opts[:client_edge_solve] || opts["client_edge_solve"]).to_s == "true"
+      if is_mobile
+        opts[:skip_rate_limits] = true
+      end
+      super(user, opts)
+      if is_mobile
+        @skip_rate_limits = true
+      end
+    end
+
     def setup_post
       super
       proto = @opts[:mobile_answer_protocol].to_i

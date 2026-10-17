@@ -28,20 +28,66 @@ after_initialize do
   end
 
   # Permit only the ownership fields, never arbitrary post custom fields.
-  %w[client_edge_solve mobile_answer_protocol].each do |name|
+  %w[client_edge_solve mobile_answer_protocol mobile_source is_mobile].each do |name|
     Post.plugin_permitted_create_params[name] = { type: :string, plugin: self }
   end
+
+  module ::SorumatikOcr::NewPostManagerBypass
+    def initialize(user, args)
+      proto = (args[:mobile_answer_protocol] || args["mobile_answer_protocol"]).to_i
+      is_mobile = proto >= 2 ||
+                  (args[:client_edge_solve] || args["client_edge_solve"]).to_s == "true" ||
+                  (args[:mobile_source] || args["mobile_source"]).to_s == "true" ||
+                  (args[:is_mobile] || args["is_mobile"]).to_s == "true"
+      if is_mobile
+        args[:skip_rate_limits] = true
+        args["skip_rate_limits"] = true
+      end
+      super(user, args)
+      if is_mobile
+        @args[:skip_rate_limits] = true if @args.is_a?(Hash)
+      end
+    end
+
+    def passes_rate_limit?(result)
+      proto = (@args[:mobile_answer_protocol] || @args["mobile_answer_protocol"]).to_i
+      is_mobile = proto >= 2 ||
+                  (@args[:client_edge_solve] || @args["client_edge_solve"]).to_s == "true" ||
+                  (@args[:mobile_source] || @args["mobile_source"]).to_s == "true" ||
+                  (@args[:is_mobile] || @args["is_mobile"]).to_s == "true" ||
+                  @args[:skip_rate_limits] == true || @args["skip_rate_limits"] == true
+      return true if is_mobile
+      super
+    end
+  end
+  NewPostManager.prepend(SorumatikOcr::NewPostManagerBypass)
+
   module ::SorumatikOcr::MobileSourceFields
     def initialize(user, opts)
       proto = (opts[:mobile_answer_protocol] || opts["mobile_answer_protocol"]).to_i
-      is_mobile = proto >= 2 || (opts[:client_edge_solve] || opts["client_edge_solve"]).to_s == "true"
+      is_mobile = proto >= 2 ||
+                  (opts[:client_edge_solve] || opts["client_edge_solve"]).to_s == "true" ||
+                  (opts[:mobile_source] || opts["mobile_source"]).to_s == "true" ||
+                  (opts[:is_mobile] || opts["is_mobile"]).to_s == "true"
       if is_mobile
         opts[:skip_rate_limits] = true
+        opts["skip_rate_limits"] = true
       end
       super(user, opts)
       if is_mobile
         @skip_rate_limits = true
       end
+    end
+
+    def passes_rate_limit?
+      proto = (@opts[:mobile_answer_protocol] || @opts["mobile_answer_protocol"]).to_i
+      is_mobile = proto >= 2 ||
+                  (@opts[:client_edge_solve] || @opts["client_edge_solve"]).to_s == "true" ||
+                  (@opts[:mobile_source] || @opts["mobile_source"]).to_s == "true" ||
+                  (@opts[:is_mobile] || @opts["is_mobile"]).to_s == "true" ||
+                  @opts[:skip_rate_limits] == true || @opts["skip_rate_limits"] == true
+      return true if is_mobile
+      super
     end
 
     def setup_post
@@ -50,6 +96,9 @@ after_initialize do
       if proto >= 2 || @opts[:client_edge_solve].to_s == "true"
         @post.custom_fields["client_edge_solve"] = @opts[:client_edge_solve].to_s
         @post.custom_fields["mobile_answer_protocol"] = proto > 0 ? proto.to_s : "2"
+      end
+      if @opts[:mobile_source].to_s == "true"
+        @post.custom_fields["mobile_source"] = "true"
       end
     end
   end

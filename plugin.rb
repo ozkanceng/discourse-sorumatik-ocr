@@ -45,7 +45,7 @@ after_initialize do
     def performed!(raise_error: true)
       t = @type.to_s
       return true if BYPASS_TYPES.include?(t)
-      return true if t.start_with?("user_api_min_") || t.start_with?("user_api_day_")
+      return true if t.start_with?("user_api_min_") || t.start_with?("user_api_day_") || t.start_with?("disabled_user_api")
       return true if @error_code.to_s.start_with?("user_api_key_limiter")
       super
     end

@@ -412,8 +412,14 @@ module SorumatikOcr
       history = ([source.topic.first_post] + recent).compact.uniq(&:id).sort_by(&:post_number)
       guardian = Guardian.new(source.user)
       history.select! { |post| post.deleted_at.nil? && guardian.can_see?(post) }
+      bot_username = SiteSetting.gemini_ai_solve_bot_username.to_s.downcase
       bot_id = defined?(::User) && ::User.respond_to?(:find_by_username) ? ::User.find_by_username(SiteSetting.gemini_ai_solve_bot_username)&.id : nil
-      history.map do |post|
+      
+      contents = []
+      history.each do |post|
+        is_bot = (bot_id && post.user_id == bot_id) || (post.user&.username&.downcase == bot_username)
+        role = is_bot ? "model" : "user"
+
         parts = []
         if post.id == source.id || post.post_number == 1
           uploads = post.respond_to?(:uploads) && post.uploads ? post.uploads : []
@@ -470,9 +476,21 @@ module SorumatikOcr
             end
           end
         end
-        parts << { text: post.raw }
-        { role: post.user_id == bot_id ? "model" : "user", parts: parts }
+
+        raw_text = post.raw.to_s.strip
+        parts << { text: raw_text } unless raw_text.empty?
+        next if parts.empty?
+
+        if contents.last && contents.last[:role] == role
+          contents.last[:parts].concat(parts)
+        else
+          contents << { role: role, parts: parts }
+        end
       end
+
+      # Gemini API requires the first turn to have role 'user'
+      contents.shift while contents.first && contents.first[:role] != "user"
+      contents
     end
 
     def log_metrics

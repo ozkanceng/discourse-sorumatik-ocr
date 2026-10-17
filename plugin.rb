@@ -32,21 +32,54 @@ after_initialize do
     Post.plugin_permitted_create_params[name] = { type: :string, plugin: self }
   end
 
+  if defined?(::GlobalSetting)
+    GlobalSetting.define_singleton_method(:max_user_api_reqs_per_minute) { 1_000_000 }
+    GlobalSetting.define_singleton_method(:max_user_api_reqs_per_day) { 10_000_000 }
+  end
+
+  begin
+    SiteSetting.rate_limit_create_topic = 0 if SiteSetting.respond_to?(:rate_limit_create_topic=)
+    SiteSetting.rate_limit_create_post = 0 if SiteSetting.respond_to?(:rate_limit_create_post=)
+    SiteSetting.rate_limit_new_user_create_post = 0 if SiteSetting.respond_to?(:rate_limit_new_user_create_post=)
+    SiteSetting.gemini_ai_solve_rate_limit_per_minute = 10_000 if SiteSetting.respond_to?(:gemini_ai_solve_rate_limit_per_minute=)
+    SiteSetting.max_topics_in_first_day = 10_000 if SiteSetting.respond_to?(:max_topics_in_first_day=)
+    SiteSetting.max_replies_in_first_day = 10_000 if SiteSetting.respond_to?(:max_replies_in_first_day=)
+    SiteSetting.max_topics_per_day = 10_000 if SiteSetting.respond_to?(:max_topics_per_day=)
+  rescue => e
+    Rails.logger.warn("[Sorumatik OCR] Failed setting zero rate limits: #{e.message}")
+  end
+
   module ::SorumatikOcr::RateLimiterBypass
     BYPASS_TYPES = %w[
       create_topic
       create_post
+      sorumatik_ai_solve
       first-day-topics-per-day
       first-day-replies-per-day
       topics-per-day
       posts-per-day
     ].freeze
 
-    def performed!(raise_error: true)
+    def rate_unlimited?
       t = @type.to_s
       return true if BYPASS_TYPES.include?(t)
       return true if t.start_with?("user_api_min_") || t.start_with?("user_api_day_") || t.start_with?("disabled_user_api")
       return true if @error_code.to_s.start_with?("user_api_key_limiter")
+      super
+    end
+
+    def can_perform?
+      return true if rate_unlimited?
+      super
+    end
+
+    def performed!(raise_error: true)
+      return true if rate_unlimited?
+      super
+    end
+
+    def seconds_to_wait
+      return 0 if rate_unlimited?
       super
     end
   end

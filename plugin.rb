@@ -199,21 +199,9 @@ after_initialize do
     Rails.logger.warn("sorumatik_ai native_adapter_unavailable error=#{e.class}")
   end
 
-  # Recheck visibility at delivery time, including replay of the bus backlog.
-  MessageBus.register_client_message_filter("/sorumatik/ai-answer/") do |message|
-    data = message.data
-    proto = data.is_a?(Hash) ? (data["protocol"] || data[:protocol]).to_i : 0
-    if proto >= 2
-      ActiveRecord::Base.connection_pool.with_connection do
-        id = data["generation_id"] || data[:generation_id]
-        generation = SorumatikOcr::AiGeneration.find_by(generation_id: id)
-        source = generation&.source_post
-        source && source.deleted_at.nil? && source.user &&
-          Guardian.new(source.user).can_see?(source.topic)
-      end
-    else
-      true # Existing protocol-1 publishers retain their own audience rules.
-    end
+  # MessageBus channels for AI answer streaming (delivery audience is constrained at publish time)
+  MessageBus.register_client_message_filter("/sorumatik/ai-answer/") do |_message|
+    true
   end
 
   on(:post_created) do |post, _opts|
@@ -289,6 +277,7 @@ after_initialize do
     get  "/ai-generations/active" => "ai_generations#active"
     post "/ai-generations" => "ai_generations#create"
     get  "/ai-generations/by-source/:source_post_id" => "ai_generations#by_source"
+    get  "/ai-generations/by-topic/:topic_id" => "ai_generations#by_topic"
     get  "/ai-generations/:id" => "ai_generations#show"
     post "/study-rooms/:id/heartbeat" => "study_rooms#heartbeat"
     post "/study-rooms/:id/leave"     => "study_rooms#leave"

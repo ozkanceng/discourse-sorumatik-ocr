@@ -33,7 +33,9 @@ module SorumatikOcr
         execution_id: respond_to?(:execution_id) ? execution_id : nil,
         topic_id: topic_id,
         source_post_id: source_post_id,
+        source_post_number: source_post&.post_number || 1,
         channel: "/sorumatik/ai-answer/#{source_post_id}",
+        topic_channel: topic_id.present? && topic_id > 0 ? "/sorumatik/ai-answer/topic/#{topic_id}" : nil,
         sequence: sequence,
         state: state,
         raw: cleaned_raw,
@@ -51,8 +53,9 @@ module SorumatikOcr
 
     def publish!
       target_topic = (respond_to?(:topic) ? topic : nil) || (source_post&.topic)
+      effective_topic_id = topic_id.presence || target_topic&.id
       publish_opts = {
-        max_backlog_size: 2,
+        max_backlog_size: 5,
         max_backlog_age: 10.minutes.to_i,
       }
 
@@ -63,11 +66,23 @@ module SorumatikOcr
         publish_opts[:group_ids] = target_topic.category.secure_group_ids rescue nil
       end
 
+      snap = snapshot
+
+      # 1. Post-based channel (mobile and direct post watchers)
       MessageBus.publish(
         "/sorumatik/ai-answer/#{source_post_id}",
-        snapshot,
+        snap,
         publish_opts
       )
+
+      # 2. Topic-based channel (web theme component topic viewers)
+      if effective_topic_id.present? && effective_topic_id.to_i > 0
+        MessageBus.publish(
+          "/sorumatik/ai-answer/topic/#{effective_topic_id}",
+          snap,
+          publish_opts
+        )
+      end
     rescue StandardError => e
       # Durable status remains readable even if MessageBus is unavailable.
       Rails.logger.warn("sorumatik_ai publish_failed generation_id=#{generation_id} error=#{e.class} message=#{e.message}")

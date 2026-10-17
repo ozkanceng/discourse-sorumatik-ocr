@@ -52,19 +52,26 @@ after_initialize do
   module ::SorumatikOcr::RateLimiterBypass
     BYPASS_TYPES = %w[
       create_topic
+      create-topic
       create_post
+      create-post
       sorumatik_ai_solve
       first-day-topics-per-day
       first-day-replies-per-day
       topics-per-day
       posts-per-day
+      unique-post
+      unique_post
     ].freeze
 
     def rate_unlimited?
+      return true if @user&.staff? || @user&.admin?
       t = @type.to_s
       return true if BYPASS_TYPES.include?(t)
-      return true if t.start_with?("user_api_min_") || t.start_with?("user_api_day_") || t.start_with?("disabled_user_api")
-      return true if @error_code.to_s.start_with?("user_api_key_limiter")
+      return true if t.include?("create-topic") || t.include?("create_topic")
+      return true if t.include?("create-post") || t.include?("create_post")
+      return true if t.start_with?("user_api_") || t.start_with?("disabled_user_api") || t.include?("user_api")
+      return true if @error_code.to_s.start_with?("user_api_key_limiter") || @error_code.to_s.include?("user_api")
       super
     end
 

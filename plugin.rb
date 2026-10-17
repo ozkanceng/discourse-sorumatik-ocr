@@ -32,32 +32,46 @@ after_initialize do
     Post.plugin_permitted_create_params[name] = { type: :string, plugin: self }
   end
 
+  module ::SorumatikOcr::RateLimiterBypass
+    BYPASS_TYPES = %w[
+      create_topic
+      create_post
+      first-day-topics-per-day
+      first-day-replies-per-day
+      topics-per-day
+      posts-per-day
+    ].freeze
+
+    def performed!(raise_error: true)
+      return true if BYPASS_TYPES.include?(@type.to_s)
+      super
+    end
+  end
+  RateLimiter.prepend(SorumatikOcr::RateLimiterBypass)
+
+  module ::SorumatikOcr::ModelRateLimitBypass
+    def default_rate_limiter
+      nil
+    end
+  end
+  Topic.prepend(SorumatikOcr::ModelRateLimitBypass)
+  Post.prepend(SorumatikOcr::ModelRateLimitBypass)
+
   module ::SorumatikOcr::NewPostManagerBypass
     def initialize(user, args)
-      proto = (args[:mobile_answer_protocol] || args["mobile_answer_protocol"]).to_i
-      is_mobile = proto >= 2 ||
-                  (args[:client_edge_solve] || args["client_edge_solve"]).to_s == "true" ||
-                  (args[:mobile_source] || args["mobile_source"]).to_s == "true" ||
-                  (args[:is_mobile] || args["is_mobile"]).to_s == "true"
-      if is_mobile
+      if args.is_a?(Hash) || args.respond_to?(:[]=)
         args[:skip_rate_limits] = true
         args["skip_rate_limits"] = true
       end
       super(user, args)
-      if is_mobile
-        @args[:skip_rate_limits] = true if @args.is_a?(Hash)
+      if @args.is_a?(Hash) || @args.respond_to?(:[]=)
+        @args[:skip_rate_limits] = true
+        @args["skip_rate_limits"] = true
       end
     end
 
-    def passes_rate_limit?(result)
-      proto = (@args[:mobile_answer_protocol] || @args["mobile_answer_protocol"]).to_i
-      is_mobile = proto >= 2 ||
-                  (@args[:client_edge_solve] || @args["client_edge_solve"]).to_s == "true" ||
-                  (@args[:mobile_source] || @args["mobile_source"]).to_s == "true" ||
-                  (@args[:is_mobile] || @args["is_mobile"]).to_s == "true" ||
-                  @args[:skip_rate_limits] == true || @args["skip_rate_limits"] == true
-      return true if is_mobile
-      super
+    def passes_rate_limit?(*)
+      true
     end
   end
   NewPostManager.prepend(SorumatikOcr::NewPostManagerBypass)

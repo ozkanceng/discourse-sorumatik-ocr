@@ -43,11 +43,30 @@ after_initialize do
     ].freeze
 
     def performed!(raise_error: true)
-      return true if BYPASS_TYPES.include?(@type.to_s)
+      t = @type.to_s
+      return true if BYPASS_TYPES.include?(t)
+      return true if t.start_with?("user_api_min_") || t.start_with?("user_api_day_")
+      return true if @error_code.to_s.start_with?("user_api_key_limiter")
       super
     end
   end
   RateLimiter.prepend(SorumatikOcr::RateLimiterBypass)
+
+  begin
+    require_dependency "auth/default_current_user_provider"
+    module ::SorumatikOcr::CurrentUserProviderBypass
+      def user_api_key_limiter_60_secs
+        @user_api_key_limiter_60_secs ||= RateLimiter.new(nil, "disabled_user_api_min", 1_000_000, 1.minute)
+      end
+
+      def user_api_key_limiter_1_day
+        @user_api_key_limiter_1_day ||= RateLimiter.new(nil, "disabled_user_api_day", 1_000_000, 1.day)
+      end
+    end
+    Auth::DefaultCurrentUserProvider.prepend(SorumatikOcr::CurrentUserProviderBypass)
+  rescue LoadError, NameError => e
+    Rails.logger.warn("[Sorumatik OCR] Failed to prepend CurrentUserProviderBypass: #{e.message}")
+  end
 
   module ::SorumatikOcr::ModelRateLimitBypass
     def default_rate_limiter

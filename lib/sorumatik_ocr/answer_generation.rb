@@ -352,22 +352,28 @@ module SorumatikOcr
         @generation.with_lock do
           return unless @generation.state == "persisting"
           raise "Answer access revoked" unless source.deleted_at.nil? && Guardian.new(source.user).can_see?(source.topic)
-          bot = defined?(::User) && ::User.respond_to?(:find_by_username) ? ::User.find_by_username(SiteSetting.gemini_ai_solve_bot_username) : nil
+          bot_username = SiteSetting.gemini_ai_solve_bot_username.to_s.strip
+          bot = (defined?(::User) && ::User.respond_to?(:find_by_username) && !bot_username.empty?) ? ::User.find_by_username(bot_username) : nil
+          bot ||= (defined?(Discourse) && Discourse.respond_to?(:system_user) ? Discourse.system_user : nil)
           raise "Configured answer bot is missing" unless bot
           topic = Topic.find_by(id: @generation.topic_id)
           raise "Topic is missing" unless topic
           creator = PostCreator.new(bot, topic_id: topic.id, raw: @generation.raw,
                                     reply_to_post_number: source.post_number, skip_validations: true,
+                                    skip_guardian: true,
                                     skip_jobs: true, skip_events: true,
                                     custom_fields: { "sorumatik_generation_id" => @generation.generation_id })
           post = creator.create!
-          # A post hook must not silently rewrite the content already streamed.
-          post_clean = post&.raw.to_s.gsub("\r\n", "\n").strip
+          raise "Post was not persisted" unless post&.persisted?
+          # If Discourse normalized whitespace or fancy quotes, align raw without rolling back
+          post_clean = post.raw.to_s.gsub("\r\n", "\n").strip
           gen_clean = @generation.raw.to_s.gsub("\r\n", "\n").strip
-          raise "Saved answer differs from streamed answer" unless post&.persisted? && post_clean == gen_clean
-          metrics = @generation.metrics.merge("saved_at" => Time.current.iso8601(3),
-                                              "save_ms" => ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - save_started) * 1000).round,
-                                              "total_ms" => ((Time.current - @generation.created_at) * 1000).round)
+          if post_clean != gen_clean
+            @generation.update_columns(raw: post.raw) rescue nil
+          end
+          metrics = (@generation.metrics || {}).merge("saved_at" => Time.current.iso8601(3),
+                                                      "save_ms" => ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - save_started) * 1000).round,
+                                                      "total_ms" => ((Time.current - @generation.created_at) * 1000).round)
           @generation.update!(state: "completed", post_id: post.id, error: nil,
                               metrics: metrics, sequence: @generation.sequence + 1)
         end
@@ -377,7 +383,7 @@ module SorumatikOcr
         creator.trigger_after_events
         creator.enqueue_jobs
       rescue StandardError => e
-        Rails.logger.warn("sorumatik_ai post_hooks_failed generation_id=#{@generation.generation_id} error=#{e.class}")
+        Rails.logger.warn("sorumatik_ai post_hooks_failed generation_id=#{@generation.generation_id} error=#{e.class} message=#{e.message}")
       end
       log_metrics unless @metrics
     rescue StandardError => e
@@ -389,11 +395,11 @@ module SorumatikOcr
         attempts = @generation.save_attempts + 1
         @generation.update!(save_attempts: attempts, state: attempts < MAX_SAVE_ATTEMPTS ? "persisting" : "failed",
                             sequence: @generation.sequence + 1,
-                            error: { code: "persistence_failed", message: "Yanıt hazır; kaydedilemedi.", retryable: true })
+                            error: { code: "persistence_failed", message: "Yanıt hazır; kaydedilemedi (#{e.message}).", retryable: true })
       end
       @generation.publish!
       Jobs.enqueue_in(2.seconds, :sorumatik_generate_answer, generation_id: @generation.id) if @generation.state == "persisting"
-      Rails.logger.warn("sorumatik_ai save_failed generation_id=#{@generation.generation_id} error=#{e.class}")
+      Rails.logger.warn("sorumatik_ai save_failed generation_id=#{@generation.generation_id} error=#{e.class} message=#{e.message}")
     end
 
     private

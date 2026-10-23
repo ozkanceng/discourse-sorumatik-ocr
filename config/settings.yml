@@ -66,3 +66,9 @@ plugins:
   gemini_tts_model:
     default: "gemini-3.8-flash-lite-tts"
     client: false
+  gemini_blackboard_model:
+    default: "gemini-3.8-flash"
+    client: false
+  gemini_blackboard_thinking_level:
+    default: "low"
+    client: false

@@ -2,7 +2,7 @@
 
 # name: discourse-sorumatik-ocr
 # about: Sorumatik için ultra hızlı Google Gemini 2.5 Flash-Lite tabanlı Matematik/Sınav OCR eklentisi.
-# version: 1.2.2
+# version: 1.2.3
 # authors: Sorumatik
 # url: https://github.com/ozkanceng/discourse-sorumatik-ocr
 
@@ -207,17 +207,6 @@ after_initialize do
   on(:post_created) do |post, _opts|
     proto = post.custom_fields["mobile_answer_protocol"].to_i
     proto = _opts[:mobile_answer_protocol].to_i if proto == 0 && _opts.is_a?(Hash)
-
-    # Sorumatik AI tarafından yönetilen konularda sistem yetkisiyle soru-cozumu etiketini ekle
-    if post.is_first_post? && post.topic.present? && (proto >= 2 || post.custom_fields["client_edge_solve"] == "true" || SorumatikOcr::AnswerGeneration.managed_source?(post))
-      begin
-        if defined?(DiscourseTagging)
-          DiscourseTagging.tag_topic_by_names(post.topic, Discourse.system_user.guardian, ["soru-cozumu"], append: true)
-        end
-      rescue => tag_err
-        Rails.logger.warn("[Sorumatik AI] Failed to auto-tag question topic: #{tag_err.message}")
-      end
-    end
 
     # Eski Protokol 2 cihaz üstü istemci akışı (yedek 95 saniye fallback):
     if proto == 2 && post.custom_fields["client_edge_solve"] == "true"

@@ -30,6 +30,12 @@ module SorumatikOcr
       tts_model = (SiteSetting.respond_to?(:gemini_tts_model) && SiteSetting.gemini_tts_model.presence) ||
                   (SiteSetting.respond_to?(:blackboard_tts_model) && SiteSetting.blackboard_tts_model.presence) ||
                   "gemini-3.8-flash-lite-tts"
+      blackboard_model = (SiteSetting.respond_to?(:gemini_blackboard_model) && SiteSetting.gemini_blackboard_model.presence) ||
+                         (SiteSetting.respond_to?(:blackboard_model) && SiteSetting.blackboard_model.presence) ||
+                         "gemini-3.8-flash"
+      blackboard_thinking_level = (SiteSetting.respond_to?(:gemini_blackboard_thinking_level) && SiteSetting.gemini_blackboard_thinking_level.presence) ||
+                                  (SiteSetting.respond_to?(:blackboard_thinking_level) && SiteSetting.blackboard_thinking_level.presence) ||
+                                  "low"
       ocr_enabled = SiteSetting.respond_to?(:gemini_ocr_enabled) ? SiteSetting.gemini_ocr_enabled : false
       tools_enabled = SiteSetting.respond_to?(:gemini_ai_tools_enabled) ? SiteSetting.gemini_ai_tools_enabled : true
       enabled = ocr_enabled && tools_enabled
@@ -50,6 +56,8 @@ module SorumatikOcr
         ocr_model: ocr_model,
         document_quiz_model: document_quiz_model,
         tts_model: tts_model,
+        blackboard_model: blackboard_model,
+        blackboard_thinking_level: blackboard_thinking_level,
         api_key: ""
       }
     rescue => err

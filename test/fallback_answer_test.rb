@@ -280,4 +280,22 @@ class FallbackAnswerTest < Minitest::Test
   ensure
     SiteSetting.gemini_ai_solve_category_ids = original
   end
+
+  def test_protocol_3_mobile_question_works_without_soru_cozumu_tag
+    mobile_post = MockPost.new(Time.now)
+    mobile_post.topic.tags = MockTagList.new([])
+    mobile_post.custom_fields = {
+      "mobile_answer_protocol" => "3",
+      "client_edge_solve" => "false",
+      "mobile_source" => "true"
+    }
+
+    assert_equal true, SorumatikOcr::AnswerGeneration.question_topic?(mobile_post.topic)
+    assert_equal true, SorumatikOcr::AnswerGeneration.managed_source?(mobile_post)
+
+    skip_caller = Object.new
+    skip_caller.extend(SorumatikOcr::ManagedAiReply)
+    skip_caller.instance_variable_set(:@bot_user, Struct.new(:username).new("sorumatik_uzman_bot"))
+    assert_nil skip_caller.reply_to(mobile_post)
+  end
 end

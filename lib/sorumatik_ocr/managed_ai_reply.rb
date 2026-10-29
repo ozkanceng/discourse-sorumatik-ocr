@@ -18,7 +18,11 @@ module SorumatikOcr
             @bot ||
             (respond_to?(:bot) ? self.bot : nil) ||
             (respond_to?(:user) ? user : nil)
-      if bot && (bot.username.to_s.casecmp?(suppress_bot) || bot.username.to_s.casecmp?("sorumatik_uzman_bot"))
+      raw_suppress = (suppress_bot || "sorumatik_uzman_bot").to_s
+      suppress_bots = raw_suppress.split(/[|,]/).map(&:strip).reject(&:empty?)
+      is_suppressed = bot && !bot.username.to_s.casecmp?(bot_username) &&
+                      (suppress_bots.any? { |sb| bot.username.to_s.casecmp?(sb) } || bot.username.to_s.casecmp?("sorumatik_uzman_bot"))
+      if is_suppressed
         t = source_post&.topic
         is_mobile_or_question = source_post&.custom_fields&.[]("client_edge_solve").to_s == "true" ||
                                 source_post&.custom_fields&.[]("mobile_answer_protocol").to_i >= 1 ||

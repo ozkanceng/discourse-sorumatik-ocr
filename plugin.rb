@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # name: discourse-sorumatik-ocr
-# about: Sorumatik için ultra hızlı Google Gemini 2.5 Flash-Lite tabanlı Matematik/Sınav OCR eklentisi.
-# version: 1.2.4
+# about: Sorumatik için ultra hızlı Google Gemini 3.1 Flash-Lite ve 3.7 Flash tabanlı Matematik/Sınav OCR ve Yapay Zeka Çözücü eklentisi.
+# version: 1.3.0
 # authors: Sorumatik
 # url: https://github.com/ozkanceng/discourse-sorumatik-ocr
 
@@ -167,7 +167,8 @@ after_initialize do
 
   # Raw is the shared renderer's source on both topic loads and single-post reads.
   add_to_serializer(:post, :sorumatik_ai_raw, include_condition: -> {
-    object.user&.username == SiteSetting.gemini_ai_solve_bot_username
+    bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
+    object.user&.username.to_s.casecmp?(bot_username) || object.custom_fields["sorumatik_generation_id"].present?
   }) { object.raw }
   add_to_serializer(:post, :sorumatik_generation_id, include_condition: -> {
     object.custom_fields["sorumatik_generation_id"].present?
@@ -202,9 +203,12 @@ after_initialize do
 
   # Bot kuralları ve mükerrer bot cevabı engelleme
   validate(:post, :validate_sorumatik_bot_reply) do
-    suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
     bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
-    is_bot_user = user.present? && (user.username.to_s.casecmp?(bot_username) || user.username.to_s.casecmp?(suppress_bot))
+    raw_suppress = (SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot").to_s
+    suppress_bots = raw_suppress.split(/[|,]/).map(&:strip).reject(&:empty?)
+    is_suppress_target = user.present? && !user.username.to_s.casecmp?(bot_username) &&
+                         (suppress_bots.any? { |sb| user.username.to_s.casecmp?(sb) } || user.username.to_s.casecmp?("sorumatik_uzman_bot"))
+    is_bot_user = user.present? && (user.username.to_s.casecmp?(bot_username) || is_suppress_target)
 
     # Botlar hiçbir zaman forumda birinci post (yeni konu açılışı) olamaz
     if is_bot_user && (post_number == 1 || is_first_post?)
@@ -213,13 +217,13 @@ after_initialize do
       next
     end
 
-    if user.present? && user.username.to_s.casecmp?(suppress_bot)
+    if is_suppress_target
       if topic.present?
         has_ai_presence = SorumatikOcr::AnswerGeneration.question_topic?(topic) ||
                           topic.custom_fields["ai_solve_handled"].present? ||
                           topic.posts.joins(:user).where(users: { username: bot_username }).exists?
         if has_ai_presence
-          Rails.logger.info("[Sorumatik AI] Suppressing automation bot #{suppress_bot} for topic ##{topic_id}")
+          Rails.logger.info("[Sorumatik AI] Suppressing automation bot #{user.username} for topic ##{topic_id}")
           errors.add(:base, "Bu konu mobil uygulama çözümü içerdiği için otomasyon botu yanıtı engellendi.")
         end
       end
@@ -251,10 +255,13 @@ after_initialize do
   end
 
   on(:before_create_post) do |post|
-    suppress_bot = SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot"
     bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
+    raw_suppress = (SiteSetting.gemini_ai_suppress_automation_bot_username.presence || "sorumatik_uzman_bot").to_s
+    suppress_bots = raw_suppress.split(/[|,]/).map(&:strip).reject(&:empty?)
     t = post.topic
-    is_bot = post.user.present? && (post.user.username.to_s.casecmp?(bot_username) || post.user.username.to_s.casecmp?(suppress_bot))
+    is_suppress_target = post.user.present? && !post.user.username.to_s.casecmp?(bot_username) &&
+                         (suppress_bots.any? { |sb| post.user.username.to_s.casecmp?(sb) } || post.user.username.to_s.casecmp?("sorumatik_uzman_bot"))
+    is_bot = post.user.present? && (post.user.username.to_s.casecmp?(bot_username) || is_suppress_target)
 
     # Botlar yeni konu açamaz
     if is_bot && (post.is_first_post? || (t.present? && t.posts_count.to_i == 0))
@@ -262,13 +269,13 @@ after_initialize do
       throw(:abort)
     end
 
-    if post.user.present? && post.user.username.to_s.casecmp?(suppress_bot)
+    if is_suppress_target
       if t.present?
         has_ai_presence = SorumatikOcr::AnswerGeneration.question_topic?(t) ||
                           t.custom_fields["ai_solve_handled"].present? ||
                           t.posts.joins(:user).where(users: { username: bot_username }).exists?
         if has_ai_presence
-          Rails.logger.info("[Sorumatik AI] Halting automation bot #{suppress_bot} post creation on topic ##{t.id}")
+          Rails.logger.info("[Sorumatik AI] Halting automation bot #{post.user.username} post creation on topic ##{t.id}")
           throw(:abort)
         end
       end

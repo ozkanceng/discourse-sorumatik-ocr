@@ -105,7 +105,7 @@ module SorumatikOcr
       parts << { text: prompt } if prompt.present?
 
       generation_config = {
-        maxOutputTokens: resolve_max_output_tokens(model, is_json: is_json)
+        maxOutputTokens: resolve_max_output_tokens(model, is_json: is_json, thinking_level: thinking_level)
       }
 
       if is_json
@@ -528,8 +528,18 @@ module SorumatikOcr
       SorumatikOcr.resolve_api_key
     end
 
-    def resolve_max_output_tokens(_model, is_json: false)
-      is_json ? 8192 : 4096
+    def resolve_max_output_tokens(model, is_json: false, thinking_level: "default")
+      m = model.to_s.strip.downcase
+      lvl = ALLOWED_THINKING_LEVELS.include?(thinking_level.to_s.strip.downcase) ? thinking_level.to_s.strip.downcase : "default"
+      if m.start_with?("gemini-2.5", "gemini-3")
+        if %w[minimal low].include?(lvl)
+          is_json ? 16_384 : 12_288
+        else
+          32_768
+        end
+      else
+        is_json ? 8_192 : 4_096
+      end
     end
 
     def apply_thinking_config!(generation_config, model, raw_level)
@@ -545,7 +555,8 @@ module SorumatikOcr
                  end
         generation_config[:thinkingConfig] = { thinkingBudget: budget }
       elsif model.to_s.start_with?("gemini-3")
-        effective_level = level == "default" ? "low" : level
+        return if level == "default"
+        effective_level = level
         if effective_level == "minimal" && model.to_s.match?(/gemini-3\.(?:[78]|1)/)
           effective_level = "low"
         end
@@ -558,7 +569,7 @@ module SorumatikOcr
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
       http.open_timeout = 5
-      http.read_timeout = 60
+      http.read_timeout = 120
 
       req = Net::HTTP::Post.new(uri.request_uri, {
         "Content-Type" => "application/json",
@@ -589,7 +600,7 @@ module SorumatikOcr
 
       uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model}:streamGenerateContent?alt=sse")
 
-      Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 90) do |http|
+      Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 180) do |http|
         req = Net::HTTP::Post.new(uri.request_uri, {
           "Content-Type" => "application/json",
           "x-goog-api-key" => api_key

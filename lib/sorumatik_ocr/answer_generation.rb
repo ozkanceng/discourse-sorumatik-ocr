@@ -7,10 +7,20 @@ require_relative "security_policy"
 
 module SorumatikOcr
   class AnswerGeneration
-    MAX_SECONDS = 90
+    MAX_SECONDS = 180
     CLIENT_LEASE_SECONDS = 90
     MAX_GENERATION_ATTEMPTS = 3
     MAX_SAVE_ATTEMPTS = 3
+
+    def self.resolve_solve_max_output_tokens(model, level = "default")
+      m = model.to_s.strip.downcase
+      lvl = level.to_s.strip.downcase
+      if m.start_with?("gemini-2.5", "gemini-3")
+        %w[minimal low].include?(lvl) ? 12_288 : 32_768
+      else
+        8_192
+      end
+    end
 
     def self.client_owned_source?(source, lease_seconds: CLIENT_LEASE_SECONDS)
       return false unless source
@@ -66,8 +76,11 @@ module SorumatikOcr
       return true if defined?(AiGeneration) && AiGeneration.respond_to?(:exists?) && AiGeneration.exists?(source_post_id: source.id)
       return false unless question_topic?(source.topic)
       return true if source.post_number == 1
-      bot = SiteSetting.gemini_ai_solve_bot_username
-      source.raw.match?(/@#{Regexp.escape(bot)}\b/i) || source.reply_to_post&.user&.username == bot
+      bot = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
+      mentioned = source.raw.to_s.match?(/@(?:#{Regexp.escape(bot)}|sorumatik_ai|sorumatik-ai|sorumatik_uzman_bot)\b/i)
+      replied_to_bot = source.reply_to_post&.user&.username.to_s.casecmp?(bot) ||
+                       %w[sorumatik_ai sorumatik-ai sorumatik_uzman_bot].include?(source.reply_to_post&.user&.username.to_s.downcase)
+      mentioned || replied_to_bot
     end
 
     def self.start!(source, fallback: false)
@@ -248,9 +261,9 @@ module SorumatikOcr
       @metrics.merge!("model" => model, "prompt_sha256" => Digest::SHA256.hexdigest(prompt))
       contents = build_contents(source)
       @metrics["images_ready_ms"] = elapsed
-      raw_level = SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) ? SiteSetting.gemini_ai_solve_thinking_level.to_s.strip.downcase : "low"
-      level = %w[default minimal low medium high].include?(raw_level) ? raw_level : "low"
-      gen_config = { maxOutputTokens: 8_192 }
+      raw_level = SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) ? SiteSetting.gemini_ai_solve_thinking_level.to_s.strip.downcase : "default"
+      level = %w[default minimal low medium high].include?(raw_level) ? raw_level : "default"
+      gen_config = { maxOutputTokens: self.class.resolve_solve_max_output_tokens(model, level) }
       if model.to_s.start_with?("gemini-2.5")
         if level != "default"
           budget = case level
@@ -262,11 +275,13 @@ module SorumatikOcr
           gen_config[:thinkingConfig] = { thinkingBudget: budget }
         end
       elsif model.to_s.start_with?("gemini-3")
-        effective_level = level == "default" ? "low" : level
-        if effective_level == "minimal" && model.to_s.match?(/gemini-3\.(?:[78]|1)/)
-          effective_level = "low"
+        if level != "default"
+          effective_level = level
+          if effective_level == "minimal" && model.to_s.match?(/gemini-3\.(?:[78]|1)/)
+            effective_level = "low"
+          end
+          gen_config[:thinkingConfig] = { thinkingLevel: effective_level }
         end
-        gen_config[:thinkingConfig] = { thinkingLevel: effective_level }
       end
 
       payload = {
@@ -290,7 +305,10 @@ module SorumatikOcr
             if @generation.respond_to?(:execution_id) && @generation.execution_id && !@generation.execution_id.empty? && @generation.execution_id != @execution_id
               raise GeminiAnswerStream::Failure.new("worker_overtaken")
             end
-            @generation.update_columns(heartbeat_at: Time.current) rescue nil
+            now = Time.current
+            hb_cols = { heartbeat_at: now }
+            hb_cols[:updated_at] = now if @generation.respond_to?(:updated_at)
+            @generation.update_columns(hb_cols) rescue nil
           end
           last_heartbeat = elapsed
         end

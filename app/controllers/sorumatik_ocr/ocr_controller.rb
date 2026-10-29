@@ -10,38 +10,41 @@ module SorumatikOcr
     skip_before_action :verify_authenticity_token
     skip_before_action :redirect_to_login_if_required
 
-    SYSTEM_PROMPT = <<~PROMPT
-      Sen uzman bir matematik OCR asistanısın. Görevin görseldeki Türkçe sınav sorusunu birebir ve en doğru biçimde yazıya aktarmaktır.
+    DEFAULT_FALLBACK_OCR_MODEL = "gemini-3.1-flash-lite"
 
-      ÖNEMLİ KURALLAR:
-      1. MATEMATİK VE METİN AYRIMI:
-         - SADECE matematiksel formülleri, denklemleri, değişkenleri ve sembolleri $...$ içine al.
-         - Türkçe kelimeleri ve cümleleri ("fonksiyonu veriliyor", "olduğuna göre", "ifadesinin değeri kaçtır?", "kaçtır" vb.) KESİNLİKLE $...$ İÇİNE ALMA!
-         - Doğru Örnek: $f(x) = \\frac{x^2 - 4}{\\sqrt{x + 2}}$ fonksiyonu veriliyor.
-         - Yanlış Örnek: $f(x) = \\frac{x^2 - 4}{\\sqrt{x + 2}} fonksiyonu veriliyor.$ (BU YANLIŞTIR, KELİMELERİ BİRBİRİNE YAPIŞTIRIR!)
-      2. TÜM LATEX KOMUTLARINI $ İÇİNE AL:
-         - Cümle içindeki veya seçeneklerdeki tüm LaTeX komutlarını (\\lim, \\frac, \\sqrt, \\int, \\sum vb.) MUTLAKA $...$ ile sınırla.
-         - Doğru Örnek: Buna göre, $\\lim_{x \\to 2} f(x)$ ifadesinin değeri kaçtır?
-         - Yanlış Örnek: Buna göre, \\lim_{x \\to 2} f(x) ifadesinin değeri kaçtır? (DOLARSIZ LATEX YASAKTIR!)
-      3. SEÇENEKLER:
-         - Seçenekleri her biri ayrı satırda olacak şekilde büyük harf ve parantez ile yaz:
+    SYSTEM_PROMPT = <<~PROMPT
+      You are an expert multilingual exam & STEM OCR assistant. Transcribe the exam question in the image verbatim in its EXACT ORIGINAL LANGUAGE (Turkish, English, Spanish, French, German, Arabic, Indonesian, etc.). NEVER translate the question into another language.
+
+      CRITICAL RULES:
+      1. STRICT SEPARATION OF MATH AND NATURAL-LANGUAGE TEXT:
+         - Wrap ONLY mathematical formulas, equations, variables, and symbolic expressions inside $...$.
+         - NEVER wrap natural-language words or sentences inside $...$ (e.g. "fonksiyonu veriliyor", "olduğuna göre", "is given by", "dada la función", "¿Cuál es el valor?").
+         - Correct: $f(x) = \\frac{x^2 - 4}{\\sqrt{x + 2}}$ fonksiyonu veriliyor.
+         - Correct: Dada la función $f(x) = x^2 - 4x + 7$, ¿cuál es su valor mínimo?
+         - Incorrect: $f(x) = \\frac{x^2 - 4}{\\sqrt{x + 2}} fonksiyonu veriliyor.$ (NEVER put prose words inside $...$!)
+      2. WRAP ALL LATEX COMMANDS IN $:
+         - Every LaTeX command (\\lim, \\frac, \\sqrt, \\int, \\sum, \\sin, \\cos, etc.) in the stem or choices MUST be enclosed in $...$.
+         - Correct: Buna göre, $\\lim_{x \\to 2} f(x)$ ifadesinin değeri kaçtır?
+      3. MULTIPLE-CHOICE OPTIONS:
+         - Put each choice on its own line with an uppercase letter and closing parenthesis:
            A) ...
            B) ...
            C) ...
            D) ...
            E) ...
-         - Seçenek harfi ile formülü ASLA ayrı satırlara bölme. Formülleri $ içine al:
-           Doğru: D) $2\\sqrt{2}$
-           Yanlış: D)\n2 \\sqrt{2}
-      4. TÜRKÇE VE SEMBOLLER:
-         - Türkçe karakterleri koru: ç, ğ, ı, ö, ş, ü, İ, Ş, Ğ, Ü, Ö, Ç.
-         - Unicode sembollerini LaTeX karşılıklarına çevir:
-           × → \\times, ÷ → \\div, ≤ → \\leq, ≥ → \\geq, √ → \\sqrt{}, π → \\pi, ∞ → \\infty
-         - Kesirleri \\frac{pay}{payda} olarak yaz.
-      5. GEREKSİZ BİLGİLER:
-         - Soru numaralarını ("Soru 12", "SORU 3" vb.) kaldır.
-         - Yorum, çözüm, açıklama veya giriş cümlesi EKLEME. Sadece sorunun saf metnini döndür.
-         - Bilinmeyen veya okunamayan kısımları [?] ile belirt.
+         - Keep the option label and its expression on the SAME line (e.g. `D) $2\\sqrt{2}$`, never split across lines).
+      4. MULTILINGUAL CHARACTERS & MATH SYMBOLS:
+         - Preserve all language-specific characters and punctuation verbatim:
+           * Turkish: ç, ğ, ı, ö, ş, ü, İ, Ş, Ğ, Ü, Ö, Ç
+           * Spanish / European: ¿, ¡, ñ, Ñ, á, é, í, ó, ú, ü, à, è, ê, ä, ö, ß
+           * Non-Latin scripts (Arabic, Cyrillic, etc.) verbatim as printed.
+         - Convert mathematical Unicode symbols to LaTeX inside $...$:
+           × → \\times, ÷ → \\div, ≤ → \\leq, ≥ → \\geq, ≠ → \\neq, √ → \\sqrt{}, π → \\pi, ∞ → \\infty
+         - Write fractions as \\frac{numerator}{denominator}.
+      5. CLEAN OUTPUT ONLY:
+         - Strip leading question numbers/headers ("Soru 12", "SORU 3", "Question 5", "Problem 2", "Pregunta 4", "Ejercicio 1", "Aufgabe 3", "Exercice 2").
+         - Do NOT solve, explain, translate, or add introductory commentary. Output ONLY the clean question text.
+         - Mark unreadable parts with [?].
     PROMPT
 
     MAX_OCR_IMAGE_BYTES = 5 * 1024 * 1024
@@ -160,8 +163,7 @@ module SorumatikOcr
         }
         system_instruction = nil
       else
-        lang = (params[:lang] || "tr").to_s.downcase
-        prompt_text = custom_prompt || (lang == "tr" ? "Bu görseldeki sınav/matematik sorusunu metin ve LaTeX formatında çıkar." : "Extract the exam question in text and LaTeX.")
+        prompt_text = custom_prompt || "Extract the exam/math question from this image accurately as plain text and $...$ LaTeX in its exact original language (do NOT translate)."
         generation_cfg = {
           maxOutputTokens: 2048
         }
@@ -174,10 +176,8 @@ module SorumatikOcr
       selected_model = SecurityPolicy.resolve_ocr_model(
         params[:model].presence || params[:engine],
         site_setting: SiteSetting,
-        fallback: "gemini-2.5-flash-lite"
+        fallback: DEFAULT_FALLBACK_OCR_MODEL
       )
-
-      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{selected_model}:generateContent")
 
       payload = {
         contents: [
@@ -197,19 +197,13 @@ module SorumatikOcr
       }
       payload[:systemInstruction] = system_instruction if system_instruction
 
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = true
-      http.open_timeout = 5
-      http.read_timeout = 25
-
-      req = Net::HTTP::Post.new(uri.request_uri, {
-        "Content-Type" => "application/json",
-        "x-goog-api-key" => api_key
-      })
-      req.body = payload.to_json
-
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      res = http.request(req)
+      res = post_gemini_ocr_request(selected_model, api_key, payload)
+      if res.code.to_i == 404 && selected_model != DEFAULT_FALLBACK_OCR_MODEL
+        Rails.logger.warn("[Sorumatik OCR] Model #{selected_model} returned 404; retrying with #{DEFAULT_FALLBACK_OCR_MODEL}")
+        selected_model = DEFAULT_FALLBACK_OCR_MODEL
+        res = post_gemini_ocr_request(selected_model, api_key, payload)
+      end
       duration_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round
 
       if res.code.to_i != 200
@@ -258,6 +252,21 @@ module SorumatikOcr
     end
 
     private
+
+    def post_gemini_ocr_request(model_name, api_key, payload)
+      uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model_name}:generateContent")
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+      http.open_timeout = 5
+      http.read_timeout = 25
+
+      req = Net::HTTP::Post.new(uri.request_uri, {
+        "Content-Type" => "application/json",
+        "x-goog-api-key" => api_key
+      })
+      req.body = payload.to_json
+      http.request(req)
+    end
 
     def ensure_authorized!
       unless SecurityPolicy.active_user?(current_user) || SecurityPolicy.valid_mobile_client?(request)

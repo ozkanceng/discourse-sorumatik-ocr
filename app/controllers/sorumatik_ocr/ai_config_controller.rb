@@ -26,8 +26,8 @@ module SorumatikOcr
       raw_solve_model = (SiteSetting.respond_to?(:gemini_ai_solve_model) && SiteSetting.gemini_ai_solve_model.presence) || model
       solve_model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: raw_solve_model, fallback: model)
       solve_system_prompt = (SiteSetting.respond_to?(:gemini_ai_solve_system_prompt) && SiteSetting.gemini_ai_solve_system_prompt.presence) || ""
-      solve_thinking_level = (SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) && SiteSetting.gemini_ai_solve_thinking_level.presence) || "low"
-      ocr_model = SecurityPolicy.resolve_ocr_model(nil, site_setting: SiteSetting, fallback: "gemini-2.5-flash-lite")
+      solve_thinking_level = (SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) && SiteSetting.gemini_ai_solve_thinking_level.presence) || "default"
+      ocr_model = SecurityPolicy.resolve_ocr_model(nil, site_setting: SiteSetting, fallback: "gemini-3.1-flash-lite")
       raw_doc_model = (SiteSetting.respond_to?(:gemini_document_quiz_model) && SiteSetting.gemini_document_quiz_model.presence) || model
       document_quiz_model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: raw_doc_model, fallback: model)
       tts_model = SecurityPolicy.resolve_tts_model(nil, site_setting: SiteSetting, fallback: "gemini-3.8-flash-lite-tts")
@@ -42,6 +42,15 @@ module SorumatikOcr
       tools_enabled = SiteSetting.respond_to?(:gemini_ai_tools_enabled) ? SiteSetting.gemini_ai_tools_enabled : true
       enabled = ocr_enabled && tools_enabled
 
+      bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
+      bot_user = defined?(::User) && ::User.respond_to?(:find_by_username) ? ::User.find_by_username(bot_username) : nil
+      bot_display_name = bot_user&.name.presence || bot_username
+      bot_avatar_url = ""
+      if bot_user&.avatar_template.present?
+        bot_avatar_url = bot_user.avatar_template.gsub("{size}", "120")
+        bot_avatar_url = "#{Discourse.base_url}#{bot_avatar_url}" if bot_avatar_url.start_with?("/")
+      end
+
       # SECURITY: İstemciye asla Gemini API anahtarı sızdırılmaz.
       # İstemciler her zaman sunucu proxy (/sorumatik/ai/generate, /sorumatik/ocr) üzerinden çalışmalıdır.
       render json: {
@@ -53,6 +62,9 @@ module SorumatikOcr
         proxy: true,
         model: model,
         solve_model: solve_model,
+        solve_bot_username: bot_username,
+        solve_bot_display_name: bot_display_name,
+        solve_bot_avatar_url: bot_avatar_url,
         solve_system_prompt: solve_system_prompt,
         solve_thinking_level: solve_thinking_level,
         ocr_model: ocr_model,

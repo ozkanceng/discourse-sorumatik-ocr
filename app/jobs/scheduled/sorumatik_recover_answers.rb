@@ -7,11 +7,17 @@ module ::Jobs
     MAX_RECOVER_ATTEMPTS = 2
 
     def execute(_args)
-      # 1. Recover stalled AiGeneration records (queued/persisting/generating stuck > 95s)
-      SorumatikOcr::AiGeneration.where(state: %w[queued persisting generating]).where("updated_at < ?", 95.seconds.ago).find_each do |generation|
+      stale_cutoff = (SorumatikOcr::AnswerGeneration::MAX_SECONDS + 15).seconds.ago
+      has_heartbeat = SorumatikOcr::AiGeneration.respond_to?(:column_names) &&
+                      SorumatikOcr::AiGeneration.column_names.include?("heartbeat_at")
+      stale_sql = has_heartbeat ? "COALESCE(heartbeat_at, updated_at) < ?" : "updated_at < ?"
+
+      # 1. Recover stalled AiGeneration records (queued/persisting/generating stuck > MAX_SECONDS + 15s)
+      SorumatikOcr::AiGeneration.where(state: %w[queued persisting generating]).where(stale_sql, stale_cutoff).find_each do |generation|
         if generation.state == "generating"
           generation.with_lock do
-            next unless generation.state == "generating" && generation.updated_at < 95.seconds.ago
+            last_touch = (has_heartbeat && generation.respond_to?(:heartbeat_at) && generation.heartbeat_at) || generation.updated_at
+            next unless generation.state == "generating" && last_touch < stale_cutoff
             generation.update!(state: "failed", sequence: generation.sequence + 1,
                                error: { code: "worker_interrupted", message: "Yanıt üretimi kesildi.", retryable: true })
           end

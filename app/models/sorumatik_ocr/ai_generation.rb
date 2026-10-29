@@ -26,6 +26,8 @@ module SorumatikOcr
       stored_hash = respond_to?(:content_sha256) ? content_sha256 : nil
       effective_hash = stored_hash.presence || computed_hash
 
+      effective_bot_username = SiteSetting.gemini_ai_solve_bot_username.presence || "sorumatik_ai"
+
       {
         protocol: 3,
         server_generation: true,
@@ -42,6 +44,7 @@ module SorumatikOcr
         content_sha256: effective_hash,
         post_id: post_id,
         post_number: post&.post_number,
+        bot_username: effective_bot_username,
         done: terminal?,
         provider_completed: respond_to?(:provider_completed) ? !!provider_completed : false,
         error: error,

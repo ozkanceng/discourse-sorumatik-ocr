@@ -24,17 +24,29 @@ module SorumatikOcr
     end
 
     def create
+      raise Discourse::InvalidAccess unless SecurityPolicy.active_user?(current_user)
+      unless SecurityPolicy.same_origin_request?(request, current_user: current_user)
+        return render_json_error("Geçersiz istek kaynağı (CSRF koruması)", status: 403)
+      end
+
+      RateLimiter.new(current_user, "sorumatik_ai_gen_create", 20, 1.minute).performed!
+
       source = Post.find_by(id: params[:source_post_id])
       source ||= Topic.find_by(id: params[:topic_id])&.first_post if params[:source_post_id].blank?
       raise Discourse::NotFound unless source && source.topic_id == params[:topic_id].to_i
       raise Discourse::InvalidAccess unless source.deleted_at.nil? && source.post_type == Post.types[:regular]
       guardian.ensure_can_see!(source.topic)
       raise Discourse::InvalidAccess unless source.user_id == current_user.id || current_user.staff?
+      if SecurityPolicy.spam_or_ineligible_post?(source)
+        return render_json_error("Source post is not eligible for AI generation", status: 422)
+      end
       unless SiteSetting.gemini_ai_solve_enabled
         return render_json_error("AI solve is disabled", status: 503)
       end
       generation = AnswerGeneration.start!(source, fallback: true)
       render json: generation.snapshot, status: generation.terminal? ? 200 : 202
+    rescue RateLimiter::LimitExceeded
+      render_json_error(I18n.t("sorumatik_ocr.rate_limited", default: "Çok fazla istek gönderildi. Lütfen biraz bekleyin."), status: 429)
     rescue GeminiAnswerStream::Failure => e
       render json: { success: false, error: e.code }, status: 409
     end

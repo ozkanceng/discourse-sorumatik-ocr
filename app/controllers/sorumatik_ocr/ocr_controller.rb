@@ -44,8 +44,11 @@ module SorumatikOcr
          - Bilinmeyen veya okunamayan kısımları [?] ile belirt.
     PROMPT
 
+    MAX_OCR_IMAGE_BYTES = 5 * 1024 * 1024
+    MAX_OCR_BASE64_CHARS = 7 * 1024 * 1024
+
     def extract
-      # 1. Authorization: user must be logged in OR have a valid User-Api-Key OR provide mobile client id
+      # 1. Authorization: active user session OR valid mobile client header (never unverified User-Api-Key)
       return unless ensure_authorized!
 
       # 2. Check if plugin is enabled
@@ -53,13 +56,17 @@ module SorumatikOcr
         return render_json_error("Gemini OCR plugin is disabled", status: 503)
       end
 
-      # 3. Rate limiting (per user or per IP)
-      limit = SiteSetting.gemini_ocr_rate_limit_per_minute.to_i
-      limit = 30 if limit <= 0
-      if current_user
+      # 3. Rate limiting (authenticated user vs strict anonymous IP minute/daily quota)
+      is_authenticated = SecurityPolicy.active_user?(current_user)
+      if is_authenticated
+        raw_limit = SiteSetting.gemini_ocr_rate_limit_per_minute.to_i
+        limit = raw_limit <= 0 ? 30 : [raw_limit, 60].min
         RateLimiter.new(current_user, "sorumatik_ocr", limit, 1.minute).performed!
+        RateLimiter.new(current_user, "sorumatik_ocr_daily", 300, 1.day).performed!
       else
-        RateLimiter.new(nil, "sorumatik_ocr_#{request.remote_ip}", limit, 1.minute).performed!
+        ip = request.remote_ip.presence || "unknown"
+        RateLimiter.new(nil, "sorumatik_ocr_ip_min_#{ip}", 8, 1.minute, global: true).performed!
+        RateLimiter.new(nil, "sorumatik_ocr_ip_day_#{ip}", 40, 1.day, global: true).performed!
       end
 
       # 4. Resolve API key securely (from SiteSetting or ENV)
@@ -69,7 +76,7 @@ module SorumatikOcr
         return render_json_error(I18n.t("sorumatik_ocr.api_key_missing"), status: 500)
       end
 
-      # 5. Handle incoming image file or base64 data
+      # 5. Handle incoming image file or base64 data with strict 5 MB & MIME validation
       image_param = params[:image]
       image_base64_param = params[:image_base64].presence || params[:data].presence
 
@@ -77,16 +84,23 @@ module SorumatikOcr
       mime_type = "image/jpeg"
 
       if image_param.present?
+        if image_param.respond_to?(:size) && image_param.size.to_i > MAX_OCR_IMAGE_BYTES
+          return render_json_error("Görsel boyutu çok büyük (maksimum 5 MB)", status: 413)
+        end
+
         image_bytes = if image_param.respond_to?(:tempfile)
-                        image_param.tempfile.read
+                        image_param.tempfile.read(MAX_OCR_IMAGE_BYTES + 1)
                       elsif image_param.respond_to?(:read)
-                        image_param.read
+                        image_param.read(MAX_OCR_IMAGE_BYTES + 1)
                       else
                         image_param.to_s
                       end
 
         if image_bytes.blank?
           return render_json_error(I18n.t("sorumatik_ocr.image_missing"), status: 400)
+        end
+        if image_bytes.bytesize > MAX_OCR_IMAGE_BYTES
+          return render_json_error("Görsel boyutu çok büyük (maksimum 5 MB)", status: 413)
         end
 
         mime_type = if image_param.respond_to?(:content_type) && image_param.content_type.present?
@@ -98,6 +112,9 @@ module SorumatikOcr
         base64_data = Base64.strict_encode64(image_bytes)
       elsif image_base64_param.present?
         raw_b64 = image_base64_param.to_s
+        if raw_b64.bytesize > MAX_OCR_BASE64_CHARS
+          return render_json_error("Görsel boyutu çok büyük (maksimum 5 MB)", status: 413)
+        end
         if raw_b64 =~ /\Adata:(image\/[a-zA-Z0-9.+-]+);base64,(.+)\z/m
           mime_type = $1
           base64_data = $2
@@ -109,9 +126,17 @@ module SorumatikOcr
         return render_json_error(I18n.t("sorumatik_ocr.image_missing"), status: 400)
       end
 
+      raw_mime = mime_type.to_s.strip.downcase
+      unless SecurityPolicy::ALLOWED_OCR_MIME_TYPES.include?(raw_mime)
+        return render_json_error("Desteklenmeyen görsel formatı (JPEG, PNG veya WebP yükleyin)", status: 400)
+      end
+      mime_type = raw_mime == "image/jpg" ? "image/jpeg" : raw_mime
+
       mode = (params[:type] || params[:mode] || "question").to_s.downcase
-      custom_prompt = params[:prompt].presence
-      branch = params[:branch].presence
+      # Prevent arbitrary LLM prompt override abuse on OCR endpoint (only staff may pass custom_prompt)
+      is_staff = is_authenticated && current_user.respond_to?(:staff?) && current_user.staff?
+      custom_prompt = is_staff ? params[:prompt].to_s.strip[0, 1_000].presence : nil
+      branch = params[:branch].to_s.gsub(/[^\p{L}\p{N}\s\/.-]/, "").strip[0, 60].presence
 
       if mode == "timetable"
         default_timetable_prompt = <<~TPROMPT
@@ -130,7 +155,7 @@ module SorumatikOcr
 
         prompt_text = custom_prompt || default_timetable_prompt
         generation_cfg = {
-          maxOutputTokens: 4096,
+          maxOutputTokens: 2048,
           responseMimeType: "application/json"
         }
         system_instruction = nil
@@ -145,13 +170,12 @@ module SorumatikOcr
         }
       end
 
-      # 5. Resolve Gemini OCR model: client parameter override (with format check) or SiteSetting
-      requested_model = (params[:model] || params[:engine]).to_s.strip
-      selected_model = if requested_model.present? && requested_model =~ /\Agemini-[a-zA-Z0-9.-]+\z/
-                         requested_model
-                       else
-                         SiteSetting.gemini_ocr_model.presence || "gemini-2.5-flash-lite"
-                       end
+      # 6. Resolve Gemini OCR model strictly through SecurityPolicy allowlist
+      selected_model = SecurityPolicy.resolve_ocr_model(
+        params[:model].presence || params[:engine],
+        site_setting: SiteSetting,
+        fallback: "gemini-2.5-flash-lite"
+      )
 
       uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{selected_model}:generateContent")
 
@@ -236,8 +260,12 @@ module SorumatikOcr
     private
 
     def ensure_authorized!
-      unless current_user.present? || request.headers["User-Api-Key"].present? || request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4"
+      unless SecurityPolicy.active_user?(current_user) || SecurityPolicy.valid_mobile_client?(request)
         render_json_error(I18n.t("sorumatik_ocr.auth_required", default: "Bu işlem için oturum açmanız veya geçerli bir istemci kullanmanız gerekmektedir"), status: 401)
+        return false
+      end
+      unless SecurityPolicy.same_origin_request?(request, current_user: current_user)
+        render_json_error("Geçersiz istek kaynağı (CSRF koruması)", status: 403)
         return false
       end
       true

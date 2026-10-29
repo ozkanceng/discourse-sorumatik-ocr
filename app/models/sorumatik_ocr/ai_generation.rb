@@ -53,17 +53,28 @@ module SorumatikOcr
 
     def publish!
       target_topic = (respond_to?(:topic) ? topic : nil) || (source_post&.topic)
+      target_topic ||= ::Topic.find_by(id: topic_id) if defined?(::Topic) && topic_id.present?
       effective_topic_id = topic_id.presence || target_topic&.id
       publish_opts = {
         max_backlog_size: 5,
         max_backlog_age: 10.minutes.to_i,
       }
 
-      if target_topic&.respond_to?(:private_message?) && target_topic.private_message?
+      is_hidden_or_unlisted = (source_post.respond_to?(:hidden?) && source_post.hidden?) ||
+                              (target_topic.respond_to?(:visible) && target_topic.visible == false)
+
+      if target_topic.nil? || is_hidden_or_unlisted
+        publish_opts[:user_ids] = [user_id].compact
+      elsif target_topic.respond_to?(:private_message?) && target_topic.private_message?
         allowed_ids = target_topic.topic_allowed_users.pluck(:user_id) rescue nil
-        publish_opts[:user_ids] = (allowed_ids.presence || [user_id])
-      elsif target_topic&.respond_to?(:category) && target_topic.category&.read_restricted?
-        publish_opts[:group_ids] = target_topic.category.secure_group_ids rescue nil
+        publish_opts[:user_ids] = (allowed_ids.presence || [user_id]).compact.uniq
+      elsif target_topic.respond_to?(:category) && target_topic.category&.read_restricted?
+        group_ids = target_topic.category.secure_group_ids rescue nil
+        if group_ids.present?
+          publish_opts[:group_ids] = group_ids
+        else
+          publish_opts[:user_ids] = [user_id].compact
+        end
       end
 
       snap = snapshot

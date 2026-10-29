@@ -11,12 +11,19 @@ module SorumatikOcr
     before_action :ensure_logged_in
 
     def stream
+      raise Discourse::InvalidAccess unless SecurityPolicy.active_user?(current_user)
+      unless SecurityPolicy.same_origin_request?(request, current_user: current_user)
+        return render_json_error("Geçersiz istek kaynağı (CSRF koruması)", status: 403)
+      end
       return render_json_error("AI solve is disabled", status: 503) unless SiteSetting.gemini_ai_solve_enabled
       topic = Topic.find_by(id: params[:topic_id])
       raise Discourse::NotFound unless topic
       guardian.ensure_can_see!(topic)
       source = params[:source_post_id].present? ? topic.posts.find(params[:source_post_id]) : topic.first_post
       raise Discourse::InvalidAccess unless source && source.deleted_at.nil? && source.post_type == Post.types[:regular] && source.user_id == current_user.id
+      if SecurityPolicy.spam_or_ineligible_post?(source)
+        return render_json_error("Source post is not eligible for AI solve", status: 422)
+      end
       generation = AnswerGeneration.start!(source)
       response.headers["Content-Type"] = "text/event-stream"
       response.headers["Cache-Control"] = "no-cache"

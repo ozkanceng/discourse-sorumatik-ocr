@@ -21,18 +21,20 @@ module SorumatikOcr
         Rails.logger.warn("[Sorumatik AI Config] RateLimiter notice: #{rl_err.message}")
       end
 
-      model = (SiteSetting.respond_to?(:gemini_ai_tools_model) && SiteSetting.gemini_ai_tools_model.presence) || "gemini-2.5-flash"
-      solve_model = (SiteSetting.respond_to?(:gemini_ai_solve_model) && SiteSetting.gemini_ai_solve_model.presence) || model
+      raw_tools_model = (SiteSetting.respond_to?(:gemini_ai_tools_model) && SiteSetting.gemini_ai_tools_model.presence) || "gemini-2.5-flash"
+      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: raw_tools_model, fallback: "gemini-2.5-flash")
+      raw_solve_model = (SiteSetting.respond_to?(:gemini_ai_solve_model) && SiteSetting.gemini_ai_solve_model.presence) || model
+      solve_model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: raw_solve_model, fallback: model)
       solve_system_prompt = (SiteSetting.respond_to?(:gemini_ai_solve_system_prompt) && SiteSetting.gemini_ai_solve_system_prompt.presence) || ""
-      solve_thinking_level = (SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) && SiteSetting.gemini_ai_solve_thinking_level.presence) || "default"
-      ocr_model = (SiteSetting.respond_to?(:gemini_ocr_model) && SiteSetting.gemini_ocr_model.presence) || "gemini-2.5-flash-lite"
-      document_quiz_model = (SiteSetting.respond_to?(:gemini_document_quiz_model) && SiteSetting.gemini_document_quiz_model.presence) || model
-      tts_model = (SiteSetting.respond_to?(:gemini_tts_model) && SiteSetting.gemini_tts_model.presence) ||
-                  (SiteSetting.respond_to?(:blackboard_tts_model) && SiteSetting.blackboard_tts_model.presence) ||
-                  "gemini-3.8-flash-lite-tts"
-      blackboard_model = (SiteSetting.respond_to?(:gemini_blackboard_model) && SiteSetting.gemini_blackboard_model.presence) ||
-                         (SiteSetting.respond_to?(:blackboard_model) && SiteSetting.blackboard_model.presence) ||
-                         "gemini-3.8-flash"
+      solve_thinking_level = (SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) && SiteSetting.gemini_ai_solve_thinking_level.presence) || "low"
+      ocr_model = SecurityPolicy.resolve_ocr_model(nil, site_setting: SiteSetting, fallback: "gemini-2.5-flash-lite")
+      raw_doc_model = (SiteSetting.respond_to?(:gemini_document_quiz_model) && SiteSetting.gemini_document_quiz_model.presence) || model
+      document_quiz_model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: raw_doc_model, fallback: model)
+      tts_model = SecurityPolicy.resolve_tts_model(nil, site_setting: SiteSetting, fallback: "gemini-3.8-flash-lite-tts")
+      raw_bb_model = (SiteSetting.respond_to?(:gemini_blackboard_model) && SiteSetting.gemini_blackboard_model.presence) ||
+                     (SiteSetting.respond_to?(:blackboard_model) && SiteSetting.blackboard_model.presence) ||
+                     "gemini-3.8-flash"
+      blackboard_model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: raw_bb_model, fallback: "gemini-3.8-flash")
       blackboard_thinking_level = (SiteSetting.respond_to?(:gemini_blackboard_thinking_level) && SiteSetting.gemini_blackboard_thinking_level.presence) ||
                                   (SiteSetting.respond_to?(:blackboard_thinking_level) && SiteSetting.blackboard_thinking_level.presence) ||
                                   "low"
@@ -61,28 +63,35 @@ module SorumatikOcr
         api_key: ""
       }
     rescue => err
-      Rails.logger.error("[Sorumatik AI Config] Error: #{err.message}")
-      render json: { success: false, error: err.message }, status: 500
+      Rails.logger.error("[Sorumatik AI Config] Error: #{err.class}: #{err.message}")
+      render json: { success: false, error: "Configuration unavailable" }, status: 500
     end
 
-    private
-
-    def resolve_api_key
-      SorumatikOcr.resolve_api_key
-    end
+    MAX_STUDY_TITLE_CHARS = 250
+    MAX_STUDY_PROMPT_CHARS = 20_000
+    MAX_STUDY_CONTENT_CHARS = 60_000
 
     # POST /sorumatik/save-study
     def save_study
-      unless current_user
+      unless SecurityPolicy.active_user?(current_user)
         return render_json_error(I18n.t("sorumatik_ocr.auth_required"), status: 401)
       end
+      unless SecurityPolicy.same_origin_request?(request, current_user: current_user)
+        return render_json_error("Geçersiz istek kaynağı (CSRF koruması)", status: 403)
+      end
 
-      title = params[:title].to_s.strip
+      RateLimiter.new(current_user, "sorumatik_save_study_min", 15, 1.minute).performed!
+      RateLimiter.new(current_user, "sorumatik_save_study_day", 200, 1.day).performed!
+
+      title = params[:title].to_s.strip[0, MAX_STUDY_TITLE_CHARS]
       prompt = params[:prompt].to_s.strip
       content = params[:content].to_s.strip
 
       if title.blank? || content.blank?
         return render_json_error("Title and content are required", status: 400)
+      end
+      if prompt.length > MAX_STUDY_PROMPT_CHARS || content.length > MAX_STUDY_CONTENT_CHARS
+        return render_json_error("Content exceeds maximum allowed length", status: 413)
       end
 
       prompt = "Yapay Zeka Çalışma İsteği" if prompt.blank?
@@ -145,14 +154,22 @@ module SorumatikOcr
         post_number: post2&.post_number || 2,
         created_at: topic.created_at
       }
+    rescue RateLimiter::LimitExceeded
+      render_json_error(I18n.t("sorumatik_ocr.rate_limited", default: "Çok fazla istek gönderildi. Lütfen biraz bekleyin."), status: 429)
     rescue => err
-      Rails.logger.error("[Sorumatik Save Study] Error saving study: #{err.message}")
-      render_json_error("Failed to save study: #{err.message}", status: 500)
+      Rails.logger.error("[Sorumatik Save Study] Error saving study: #{err.class}: #{err.message}")
+      render_json_error("Failed to save study", status: 500)
     end
 
     # Compatibility import: never regenerate or acknowledge different text.
     def save_solution
-      raise Discourse::NotLoggedIn unless current_user
+      raise Discourse::NotLoggedIn unless SecurityPolicy.active_user?(current_user)
+      unless SecurityPolicy.same_origin_request?(request, current_user: current_user)
+        return render_json_error("Geçersiz istek kaynağı (CSRF koruması)", status: 403)
+      end
+
+      RateLimiter.new(current_user, "sorumatik_save_solution_min", 20, 1.minute).performed!
+
       topic = Topic.find_by(id: params[:topic_id])
       raise Discourse::NotFound unless topic
       guardian.ensure_can_see!(topic)
@@ -160,6 +177,7 @@ module SorumatikOcr
       raise Discourse::InvalidAccess unless source && source.deleted_at.nil? && source.post_type == Post.types[:regular] && source.user_id == current_user.id
       content = params[:content].to_s.gsub("\r\n", "\n").strip
       return render_json_error("Content is required", status: 400) if content.blank?
+      return render_json_error("Content exceeds maximum allowed length", status: 413) if content.length > MAX_STUDY_CONTENT_CHARS
       if params[:content_sha256].present?
         raw_param = params[:content].to_s
         expected_hashes = [Digest::SHA256.hexdigest(content), Digest::SHA256.hexdigest(raw_param)]
@@ -172,8 +190,16 @@ module SorumatikOcr
       duplicate = previous && previous.post_id.present? && previous.post_id == generation.post_id
       render json: generation.snapshot.merge(success: generation.state == "completed", duplicate: !!duplicate),
              status: generation.state == "completed" ? 200 : 202
+    rescue RateLimiter::LimitExceeded
+      render_json_error(I18n.t("sorumatik_ocr.rate_limited", default: "Çok fazla istek gönderildi. Lütfen biraz bekleyin."), status: 429)
     rescue GeminiAnswerStream::Failure => e
       return render json: { success: false, error: e.code }, status: 409
+    end
+
+    private
+
+    def resolve_api_key
+      SorumatikOcr.resolve_api_key
     end
   end
 end

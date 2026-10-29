@@ -26,10 +26,10 @@ plugins:
     default: "sorumatik_ai"
     client: false
   gemini_ai_solve_rate_limit_per_minute:
-    default: 120
+    default: 15
     client: false
   gemini_ai_solve_thinking_level:
-    default: "default"
+    default: "low"
     client: false
   gemini_ai_solve_system_prompt:
     default: "Sen Sorumatik platformunda uzman, pedagojik formasyona sahip kıdemli bir öğretmensin. Öğrencilerin sorduğu soruları adım adım, anlaşılır, cesaretlendirici ve eğitici bir dille açıkla. Matematiksel formülleri $...$ veya $$...$$ içine al. Gereksiz giriş-çıkış lafı yapmadan doğrudan soru çözümüne odaklan."
@@ -58,7 +58,10 @@ plugins:
     max: 100
     client: false
   gemini_ai_rate_limit_per_minute:
-    default: 120
+    default: 30
+    client: false
+  gemini_ai_allowed_models:
+    default: "gemini-2.5-flash|gemini-2.5-flash-lite|gemini-2.0-flash|gemini-2.0-flash-lite|gemini-3-flash|gemini-3.1-flash-lite|gemini-3.5-flash-lite|gemini-3.6-flash|gemini-3.7-flash|gemini-3.8-flash"
     client: false
   gemini_legacy_client_fallback:
     default: false

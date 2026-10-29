@@ -9,6 +9,7 @@ module ::Jobs
 
       post = Post.find_by(id: args[:post_id])
       return unless post && post.deleted_at.nil? && post.post_type == Post.types[:regular]
+      return if SorumatikOcr::SecurityPolicy.spam_or_ineligible_post?(post)
 
       topic = post.topic
       return unless topic && topic.deleted_at.nil?
@@ -22,9 +23,15 @@ module ::Jobs
       has_bot_answer = topic.posts.where(user_id: bot.id).where("post_number > ?", post.post_number).exists?
       return if has_bot_answer
 
-      # If there is already an active or completed generation for this source post, do not duplicate
+      # If there is already an active, completed, or non-retryably failed generation for this source post, do not duplicate
       generation = SorumatikOcr::AiGeneration.find_by(source_post_id: post.id)
       return if generation && %w[completed persisting generating].include?(generation.state)
+      if generation && generation.state == "failed"
+        retryable = generation.error&.dig("retryable")
+        retryable = generation.error&.dig(:retryable) if retryable.nil?
+        err_code = (generation.error&.dig("code") || generation.error&.dig(:code)).to_s
+        return if retryable == false && !%w[worker_interrupted persistence_failed].include?(err_code)
+      end
 
       Rails.logger.info("[Sorumatik AI] Fallback triggered for orphaned source post ##{post.id} (topic ##{topic.id})")
       SorumatikOcr::AnswerGeneration.start!(post, fallback: true)

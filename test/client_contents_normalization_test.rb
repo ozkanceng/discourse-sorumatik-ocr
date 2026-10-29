@@ -5,7 +5,7 @@ require "minitest/autorun"
 # multi-turn solving payload can be validated without booting Rails.
 module ClientContentsNormalization
   MAX_CLIENT_CONTENTS = 24
-  MAX_CLIENT_PART_BYTES = 12 * 1024 * 1024
+  MAX_CLIENT_PART_BYTES = 7 * 1024 * 1024
 
   def self.normalize_client_contents(raw_contents)
     contents = raw_contents.is_a?(Array) ? raw_contents.first(MAX_CLIENT_CONTENTS) : []

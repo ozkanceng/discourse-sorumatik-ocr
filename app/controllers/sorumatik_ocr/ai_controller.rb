@@ -45,16 +45,30 @@ module SorumatikOcr
 
     # POST /sorumatik/ai/generate
     def generate
-      ensure_authorized! || return
+      ensure_authenticated_user! || return
       ensure_plugin_and_key! || return
       enforce_rate_limit! || return
 
       prompt = params[:prompt].to_s
+      if prompt.length > MAX_PROMPT_CHARS
+        return render_json_error("İstek metni çok uzun (maksimum #{MAX_PROMPT_CHARS} karakter)", status: 413)
+      end
+
       system_instruction = params[:system_instruction].presence || params[:systemInstruction]
-      model = params[:model].presence || (SiteSetting.respond_to?(:gemini_ai_tools_model) ? SiteSetting.gemini_ai_tools_model.presence : nil) || "gemini-2.5-flash"
+      if system_instruction.present? && system_instruction.to_s.length > MAX_SYSTEM_INSTRUCTION_CHARS
+        return render_json_error("Sistem yönergesi çok uzun", status: 413)
+      end
+
+      default_tools_model = SiteSetting.respond_to?(:gemini_ai_tools_model) ? SiteSetting.gemini_ai_tools_model.presence : nil
+      model = SecurityPolicy.resolve_text_model(
+        params[:model],
+        site_setting: SiteSetting,
+        setting_model: default_tools_model,
+        fallback: "gemini-2.5-flash"
+      )
       media_parts = params[:media_parts] || params[:mediaParts] || []
       is_json = params[:is_json].to_s == "true" || params[:isJson].to_s == "true"
-      thinking_level = params[:thinking_level].presence || params[:thinkingLevel].presence
+      thinking_level = (params[:thinking_level].presence || params[:thinkingLevel].presence).to_s.strip.downcase
       client_contents = normalize_client_contents(params[:contents])
 
       if prompt.blank? && media_parts.blank? && client_contents.blank?
@@ -63,13 +77,26 @@ module SorumatikOcr
 
       parts = []
       if media_parts.is_a?(Array)
+        if media_parts.length > MAX_MEDIA_PARTS
+          return render_json_error("En fazla #{MAX_MEDIA_PARTS} medya dosyası gönderilebilir", status: 400)
+        end
+
         media_parts.each do |part|
           if part.is_a?(Hash) && (part["inlineData"] || part[:inlineData])
             data_hash = part["inlineData"] || part[:inlineData]
+            raw_data = (data_hash["data"] || data_hash[:data]).to_s
+            if raw_data.blank? || raw_data.bytesize > MAX_CLIENT_PART_BYTES
+              return render_json_error("Medya dosyası boyutu sınırı aşıyor (maksimum 5 MB)", status: 413)
+            end
+            raw_mime = (data_hash["mimeType"] || data_hash[:mimeType] || "image/jpeg").to_s.strip.downcase
+            unless SecurityPolicy::ALLOWED_MEDIA_MIME_TYPES.include?(raw_mime)
+              return render_json_error("Desteklenmeyen medya türü", status: 400)
+            end
+            normalized_mime = raw_mime == "image/jpg" ? "image/jpeg" : raw_mime
             parts << {
               inline_data: {
-                mime_type: data_hash["mimeType"] || data_hash[:mimeType] || "image/jpeg",
-                data: data_hash["data"] || data_hash[:data]
+                mime_type: normalized_mime,
+                data: raw_data
               }
             }
           end
@@ -78,22 +105,14 @@ module SorumatikOcr
       parts << { text: prompt } if prompt.present?
 
       generation_config = {
-        maxOutputTokens: resolve_max_output_tokens(model)
+        maxOutputTokens: resolve_max_output_tokens(model, is_json: is_json)
       }
 
       if is_json
         generation_config[:responseMimeType] = "application/json"
       end
 
-      if thinking_level.present? && thinking_level != "default"
-        if model.to_s.start_with?("gemini-2.5")
-          generation_config[:thinkingConfig] = { thinkingBudget: (thinking_level == "minimal" ? 0 : -1) }
-        else
-          # Gemini 3.7, 3.8 and 3.1 Pro do not support 'minimal', gracefully fallback to 'low'
-          effective_level = (thinking_level == "minimal" && model.to_s =~ /gemini-3\.(?:[78]|1-pro)/) ? "low" : thinking_level
-          generation_config[:thinkingConfig] = { thinkingLevel: effective_level }
-        end
-      end
+      apply_thinking_config!(generation_config, model, thinking_level)
 
       payload = {
         contents: client_contents.presence || [{ parts: parts }],
@@ -101,7 +120,7 @@ module SorumatikOcr
       }
 
       if system_instruction.present?
-        payload[:systemInstruction] = { parts: [{ text: system_instruction }] }
+        payload[:systemInstruction] = { parts: [{ text: system_instruction.to_s }] }
       end
 
       api_key = resolve_api_key
@@ -125,21 +144,26 @@ module SorumatikOcr
 
     # POST /sorumatik/ai/tts
     def tts
-      ensure_authorized! || return
+      ensure_tts_authorized! || return
       ensure_plugin_and_key! || return
-      enforce_rate_limit! || return
+      enforce_tts_rate_limit! || return
 
       text = params[:text].to_s.strip
       if text.blank?
         return render_json_error("Metin gereklidir", status: 400)
       end
+      if text.length > MAX_TTS_TEXT_CHARS
+        return render_json_error("Seslendirilecek metin çok uzun (maksimum #{MAX_TTS_TEXT_CHARS} karakter)", status: 413)
+      end
 
-      voice = params[:voice].presence || "Kore"
+      raw_voice = params[:voice].presence || "Kore"
+      voice = raw_voice.to_s.match?(SecurityPolicy::TTS_VOICE_REGEX) ? raw_voice.to_s : "Kore"
       api_key = resolve_api_key
-      model = params[:model].presence ||
-              (SiteSetting.respond_to?(:gemini_tts_model) && SiteSetting.gemini_tts_model.presence) ||
-              (SiteSetting.respond_to?(:blackboard_tts_model) && SiteSetting.blackboard_tts_model.presence) ||
-              "gemini-3.8-flash-lite-tts"
+      model = SecurityPolicy.resolve_tts_model(
+        params[:model],
+        site_setting: SiteSetting,
+        fallback: "gemini-3.8-flash-lite-tts"
+      )
 
       payload = {
         model: model,
@@ -179,7 +203,6 @@ module SorumatikOcr
         audio_step = steps.reverse.find { |s| s["type"] == "model_output" }
         audio_content = audio_step&.dig("content")&.find { |c| c["type"] == "audio" }
         audio_base64 = audio_content&.dig("data")
-        audio_mime = audio_content&.dig("mime_type") || "audio/wav"
 
         if audio_base64.present?
           clean_base64 = sanitize_wav_base64(audio_base64)
@@ -193,34 +216,44 @@ module SorumatikOcr
           render_json_error("Ses verisi üretilemedi", status: 500)
         end
       else
-        render_json_error("Google TTS servisi yanıt vermedi (Kod: #{res.code})", status: 500)
+        Rails.logger.error("[Sorumatik AI TTS] Google TTS #{res.code}: #{res.body.to_s[0..200]}")
+        render_json_error("Google TTS servisi yanıt vermedi (Kod: #{res.code})", status: 502)
       end
     rescue => e
-      render_json_error("TTS servisi bağlantı hatası: #{e.message}", status: 500)
+      Rails.logger.error("[Sorumatik AI TTS] Bağlantı hatası: #{e.class}: #{e.message}")
+      render_json_error("TTS servisi şu anda yanıt veremiyor", status: 500)
     end
 
     # POST /sorumatik/ai/coach
     def coach
-      ensure_authorized! || return
+      ensure_authenticated_user! || return
       ensure_plugin_and_key! || return
       enforce_rate_limit! || return
 
       messages = params[:messages] || []
-      user_prompt = params[:prompt].presence || (messages.is_a?(Array) ? messages.last&.dig(:text) : nil)
+      user_prompt = (params[:prompt].presence || (messages.is_a?(Array) ? messages.last&.dig(:text) : nil)).to_s
 
       if user_prompt.blank? && messages.blank?
         return render_json_error("Prompt veya mesaj geçmişi gereklidir", status: 400)
       end
+      if user_prompt.length > MAX_PROMPT_CHARS
+        return render_json_error("İstek metni çok uzun", status: 413)
+      end
 
       contents = []
       if messages.is_a?(Array) && messages.any?
-        messages.each do |msg|
+        messages.last(MAX_CLIENT_CONTENTS).each do |msg|
+          next unless msg.is_a?(Hash)
           role = (msg[:role] == "user" || msg["role"] == "user") ? "user" : "model"
-          txt = msg[:text] || msg["text"] || ""
+          txt = (msg[:text] || msg["text"]).to_s[0, 10_000]
           contents << { role: role, parts: [{ text: txt }] } if txt.present?
         end
       else
         contents << { role: "user", parts: [{ text: user_prompt }] }
+      end
+
+      if contents.blank?
+        return render_json_error("Geçerli mesaj içeriği bulunamadı", status: 400)
       end
 
       payload = {
@@ -234,7 +267,8 @@ module SorumatikOcr
       }
 
       api_key = resolve_api_key
-      model = SiteSetting.respond_to?(:gemini_ai_tools_model) ? (SiteSetting.gemini_ai_tools_model.presence || "gemini-2.5-flash") : "gemini-2.5-flash"
+      default_tools_model = SiteSetting.respond_to?(:gemini_ai_tools_model) ? SiteSetting.gemini_ai_tools_model.presence : nil
+      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: default_tools_model, fallback: "gemini-2.5-flash")
 
       is_stream = params[:stream].to_s == "true" || request.headers["Accept"].to_s.include?("text/event-stream")
 
@@ -256,21 +290,31 @@ module SorumatikOcr
 
     # POST /sorumatik/ai/solve
     def solve
-      ensure_authorized! || return
+      ensure_authenticated_user! || return
       ensure_plugin_and_key! || return
       enforce_rate_limit! || return
 
       question_text = params[:question_text].to_s
       image_base64 = params[:image_base64].to_s
-      image_mime = params[:image_mime_type].presence || "image/jpeg"
+      raw_mime = (params[:image_mime_type].presence || "image/jpeg").to_s.strip.downcase
 
       if question_text.blank? && image_base64.blank?
         return render_json_error("Soru metni veya görseli gereklidir", status: 400)
+      end
+      if question_text.length > MAX_PROMPT_CHARS
+        return render_json_error("Soru metni çok uzun", status: 413)
       end
 
       parts = []
       parts << { text: question_text } if question_text.present?
       if image_base64.present?
+        if image_base64.bytesize > MAX_CLIENT_PART_BYTES
+          return render_json_error("Görsel boyutu sınırı aşıyor (maksimum 5 MB)", status: 413)
+        end
+        unless SecurityPolicy::ALLOWED_OCR_MIME_TYPES.include?(raw_mime)
+          return render_json_error("Desteklenmeyen görsel formatı", status: 400)
+        end
+        image_mime = raw_mime == "image/jpg" ? "image/jpeg" : raw_mime
         parts << {
           inline_data: {
             mime_type: image_mime,
@@ -290,7 +334,8 @@ module SorumatikOcr
       }
 
       api_key = resolve_api_key
-      model = SiteSetting.respond_to?(:gemini_ai_solve_model) ? (SiteSetting.gemini_ai_solve_model.presence || "gemini-2.5-flash") : "gemini-2.5-flash"
+      default_solve_model = SiteSetting.respond_to?(:gemini_ai_solve_model) ? SiteSetting.gemini_ai_solve_model.presence : nil
+      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: default_solve_model, fallback: "gemini-2.5-flash")
 
       res = call_gemini_sync(model, api_key, payload)
       if res[:success]
@@ -306,14 +351,14 @@ module SorumatikOcr
 
     # POST /sorumatik/ai/plan
     def plan
-      ensure_authorized! || return
+      ensure_authenticated_user! || return
       ensure_plugin_and_key! || return
       enforce_rate_limit! || return
 
-      exam = params[:exam].presence || "YKS Sayısal"
-      target_rank = params[:target_rank] || 10000
-      daily_hours = params[:daily_hours] || 5
-      weak_subjects = params[:weak_subjects] || []
+      exam = (params[:exam].presence || "YKS Sayısal").to_s.strip[0, 80]
+      target_rank = (params[:target_rank] || 10_000).to_i.clamp(1, 5_000_000)
+      daily_hours = (params[:daily_hours] || 5).to_f.clamp(0.5, 18.0)
+      weak_subjects = Array(params[:weak_subjects]).first(25).map { |s| s.to_s.strip[0, 80] }.reject(&:blank?)
 
       prompt = <<~USER_P
         Hedef Sınav: #{exam}
@@ -348,7 +393,8 @@ module SorumatikOcr
       }
 
       api_key = resolve_api_key
-      model = SiteSetting.respond_to?(:gemini_ai_tools_model) ? (SiteSetting.gemini_ai_tools_model.presence || "gemini-2.5-flash") : "gemini-2.5-flash"
+      default_tools_model = SiteSetting.respond_to?(:gemini_ai_tools_model) ? SiteSetting.gemini_ai_tools_model.presence : nil
+      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: default_tools_model, fallback: "gemini-2.5-flash")
 
       res = call_gemini_sync(model, api_key, payload)
       if res[:success]
@@ -365,13 +411,19 @@ module SorumatikOcr
     private
 
     MAX_CLIENT_CONTENTS = 24
-    MAX_CLIENT_PART_BYTES = 12 * 1024 * 1024
+    MAX_CLIENT_PART_BYTES = 7 * 1024 * 1024
+    MAX_MEDIA_PARTS = 4
+    MAX_PROMPT_CHARS = 20_000
+    MAX_SYSTEM_INSTRUCTION_CHARS = 10_000
+    MAX_TTS_TEXT_CHARS = 2_500
+    ALLOWED_THINKING_LEVELS = %w[default minimal low medium high].freeze
 
     # Multi-turn question solving sends the reconstructed topic history. Roles are
     # validated here so a client cannot fabricate a "model" turn to steer answers.
     def normalize_client_contents(raw_contents)
       contents = raw_contents.is_a?(Array) ? raw_contents.first(MAX_CLIENT_CONTENTS) : []
       normalized = []
+      media_count = 0
       contents.each do |turn|
         next unless turn.is_a?(Hash)
         parts = turn["parts"] || turn[:parts]
@@ -383,12 +435,16 @@ module SorumatikOcr
           next unless part.is_a?(Hash)
           data = part["inlineData"] || part[:inlineData] || part["inline_data"] || part[:inline_data]
           if data.is_a?(Hash)
-            encoded = data["data"] || data[:data]
-            next if encoded.blank? || encoded.length > MAX_CLIENT_PART_BYTES
-            mime = data["mimeType"] || data[:mimeType] || data["mime_type"] || data[:mime_type] || "image/jpeg"
+            next if media_count >= MAX_MEDIA_PARTS
+            encoded = (data["data"] || data[:data]).to_s
+            next if encoded.blank? || encoded.bytesize > MAX_CLIENT_PART_BYTES
+            raw_mime = (data["mimeType"] || data[:mimeType] || data["mime_type"] || data[:mime_type] || "image/jpeg").to_s.strip.downcase
+            next unless SecurityPolicy::ALLOWED_MEDIA_MIME_TYPES.include?(raw_mime)
+            mime = raw_mime == "image/jpg" ? "image/jpeg" : raw_mime
+            media_count += 1
             cleaned << { inline_data: { mime_type: mime, data: encoded } }
           else
-            text = part["text"] || part[:text]
+            text = (part["text"] || part[:text]).to_s[0, MAX_PROMPT_CHARS]
             next if text.blank?
             cleaned << { text: text }
           end
@@ -399,9 +455,25 @@ module SorumatikOcr
       normalized
     end
 
-    def ensure_authorized!
-      unless current_user.present? || request.headers["User-Api-Key"].present? || request.headers["User-Api-Client-Id"].to_s == "sorumatik_mobile_v4"
+    def ensure_authenticated_user!
+      unless SecurityPolicy.active_user?(current_user)
         render_json_error(I18n.t("sorumatik_ocr.auth_required", default: "Giriş yapmanız gerekmektedir"), status: 401)
+        return false
+      end
+      ensure_same_origin!
+    end
+
+    def ensure_tts_authorized!
+      unless SecurityPolicy.active_user?(current_user) || SecurityPolicy.valid_mobile_client?(request)
+        render_json_error(I18n.t("sorumatik_ocr.auth_required", default: "Giriş yapmanız gerekmektedir"), status: 401)
+        return false
+      end
+      ensure_same_origin!
+    end
+
+    def ensure_same_origin!
+      unless SecurityPolicy.same_origin_request?(request, current_user: current_user)
+        render_json_error("Geçersiz istek kaynağı (CSRF koruması)", status: 403)
         return false
       end
       true
@@ -423,16 +495,32 @@ module SorumatikOcr
     end
 
     def enforce_rate_limit!
-      limit = SiteSetting.respond_to?(:gemini_ai_rate_limit_per_minute) ? SiteSetting.gemini_ai_rate_limit_per_minute.to_i : 30
-      limit = 30 if limit <= 0
+      raw_limit = SiteSetting.respond_to?(:gemini_ai_rate_limit_per_minute) ? SiteSetting.gemini_ai_rate_limit_per_minute.to_i : 30
+      limit = raw_limit <= 0 ? 30 : [raw_limit, 120].min
       if current_user
         RateLimiter.new(current_user, "sorumatik_ai_proxy", limit, 1.minute).performed!
+        RateLimiter.new(current_user, "sorumatik_ai_proxy_daily", 500, 1.day).performed!
       elsif request.remote_ip.present?
-        RateLimiter.new(nil, "sorumatik_ai_proxy_#{request.remote_ip}", limit, 1.minute, global: true).performed!
+        RateLimiter.new(nil, "sorumatik_ai_proxy_#{request.remote_ip}", 10, 1.minute, global: true).performed!
       end
       true
     rescue RateLimiter::LimitExceeded
-      render_json_error("Çok fazla istek gönderildi. Lütfen bir dakika bekleyin.", status: 429)
+      render_json_error("Çok fazla istek gönderildi. Lütfen biraz bekleyin.", status: 429)
+      false
+    end
+
+    def enforce_tts_rate_limit!
+      if SecurityPolicy.active_user?(current_user)
+        RateLimiter.new(current_user, "sorumatik_ai_tts_min", 20, 1.minute).performed!
+        RateLimiter.new(current_user, "sorumatik_ai_tts_day", 250, 1.day).performed!
+      else
+        ip = request.remote_ip.presence || "unknown"
+        RateLimiter.new(nil, "sorumatik_ai_tts_ip_min_#{ip}", 8, 1.minute, global: true).performed!
+        RateLimiter.new(nil, "sorumatik_ai_tts_ip_day_#{ip}", 50, 1.day, global: true).performed!
+      end
+      true
+    rescue RateLimiter::LimitExceeded
+      render_json_error("Çok fazla seslendirme isteği gönderildi. Lütfen biraz bekleyin.", status: 429)
       false
     end
 
@@ -440,14 +528,28 @@ module SorumatikOcr
       SorumatikOcr.resolve_api_key
     end
 
-    def resolve_max_output_tokens(model)
-      m = model.to_s.downcase
-      if m.include?("3.1") || m.include?("3.8") || m.include?("3-") || m.include?("pro")
-        65536
-      elsif m.include?("2.5")
-        16384
-      else
-        8192
+    def resolve_max_output_tokens(_model, is_json: false)
+      is_json ? 8192 : 4096
+    end
+
+    def apply_thinking_config!(generation_config, model, raw_level)
+      level = ALLOWED_THINKING_LEVELS.include?(raw_level) ? raw_level : "default"
+
+      if model.to_s.start_with?("gemini-2.5")
+        return if level == "default"
+        budget = case level
+                 when "minimal" then 0
+                 when "low" then 1024
+                 when "medium" then 2048
+                 else 4096
+                 end
+        generation_config[:thinkingConfig] = { thinkingBudget: budget }
+      elsif model.to_s.start_with?("gemini-3")
+        effective_level = level == "default" ? "low" : level
+        if effective_level == "minimal" && model.to_s.match?(/gemini-3\.(?:[78]|1)/)
+          effective_level = "low"
+        end
+        generation_config[:thinkingConfig] = { thinkingLevel: effective_level }
       end
     end
 
@@ -469,15 +571,15 @@ module SorumatikOcr
         parsed = JSON.parse(res.body)
         candidates = parsed["candidates"] || []
         parts = candidates.first&.dig("content", "parts") || []
-        text = parts.map { |p| p["text"] }.compact.join("\n")
+        text = parts.reject { |p| p["thought"] == true }.map { |p| p["text"] }.compact.join("\n")
         { success: true, text: text }
       else
         Rails.logger.error("[Sorumatik AI Proxy] Gemini #{res.code}: #{res.body.to_s[0..200]}")
         { success: false, error: "Google AI yanıt vermedi (Kod: #{res.code})" }
       end
     rescue => e
-      Rails.logger.error("[Sorumatik AI Proxy] Bağlantı hatası: #{e.message}")
-      { success: false, error: e.message }
+      Rails.logger.error("[Sorumatik AI Proxy] Bağlantı hatası: #{e.class}: #{e.message}")
+      { success: false, error: "Yapay zeka servisine bağlanılamadı" }
     end
 
     def stream_gemini_sse(model, api_key, payload)
@@ -506,8 +608,8 @@ module SorumatikOcr
         end
       end
     rescue => e
-      Rails.logger.error("[Sorumatik AI Proxy SSE Hatası] #{e.message}")
-      response.stream.write("data: #{ { error: e.message }.to_json }\n\n")
+      Rails.logger.error("[Sorumatik AI Proxy SSE Hatası] #{e.class}: #{e.message}")
+      response.stream.write("data: #{ { error: "Akış bağlantısı kesildi" }.to_json }\n\n")
     ensure
       response.stream.close rescue nil
     end

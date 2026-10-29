@@ -2,7 +2,7 @@
 
 # name: discourse-sorumatik-ocr
 # about: Sorumatik için ultra hızlı Google Gemini 2.5 Flash-Lite tabanlı Matematik/Sınav OCR eklentisi.
-# version: 1.2.3
+# version: 1.2.4
 # authors: Sorumatik
 # url: https://github.com/ozkanceng/discourse-sorumatik-ocr
 
@@ -32,75 +32,46 @@ after_initialize do
     Post.plugin_permitted_create_params[name] = { type: :string, plugin: self }
   end
 
+  # Keep comfortable headroom for authenticated mobile User-Api-Key polling/sync
+  # (mobile live streaming polls /message-bus/*/poll every ~80ms chunk = ~300 reqs per stream)
+  # without disabling Discourse anti-spam topic/post creation rate limits.
   if defined?(::GlobalSetting)
-    GlobalSetting.define_singleton_method(:max_user_api_reqs_per_minute) { 1_000_000 }
-    GlobalSetting.define_singleton_method(:max_user_api_reqs_per_day) { 10_000_000 }
+    GlobalSetting.define_singleton_method(:max_user_api_reqs_per_minute) { 2_500 }
+    GlobalSetting.define_singleton_method(:max_user_api_reqs_per_day) { 100_000 }
   end
 
+  # Heal legacy v1.2.3 zeroed/10k anti-spam settings if persisted in DB,
+  # while respecting any custom values explicitly tuned by the administrator.
   begin
-    SiteSetting.rate_limit_create_topic = 0 if SiteSetting.respond_to?(:rate_limit_create_topic=)
-    SiteSetting.rate_limit_create_post = 0 if SiteSetting.respond_to?(:rate_limit_create_post=)
-    SiteSetting.rate_limit_new_user_create_post = 0 if SiteSetting.respond_to?(:rate_limit_new_user_create_post=)
-    SiteSetting.gemini_ai_solve_rate_limit_per_minute = 10_000 if SiteSetting.respond_to?(:gemini_ai_solve_rate_limit_per_minute=)
-    SiteSetting.max_topics_in_first_day = 10_000 if SiteSetting.respond_to?(:max_topics_in_first_day=)
-    SiteSetting.max_replies_in_first_day = 10_000 if SiteSetting.respond_to?(:max_replies_in_first_day=)
-    SiteSetting.max_topics_per_day = 10_000 if SiteSetting.respond_to?(:max_topics_per_day=)
+    SiteSetting.rate_limit_create_topic = 5 if SiteSetting.respond_to?(:rate_limit_create_topic=) && SiteSetting.rate_limit_create_topic.to_i <= 0
+    SiteSetting.rate_limit_create_post = 3 if SiteSetting.respond_to?(:rate_limit_create_post=) && SiteSetting.rate_limit_create_post.to_i <= 0
+    SiteSetting.rate_limit_new_user_create_post = 10 if SiteSetting.respond_to?(:rate_limit_new_user_create_post=) && SiteSetting.rate_limit_new_user_create_post.to_i <= 0
+    SiteSetting.gemini_ai_solve_rate_limit_per_minute = 15 if SiteSetting.respond_to?(:gemini_ai_solve_rate_limit_per_minute=) && SiteSetting.gemini_ai_solve_rate_limit_per_minute.to_i >= 10_000
+    SiteSetting.max_topics_in_first_day = 30 if SiteSetting.respond_to?(:max_topics_in_first_day=) && SiteSetting.max_topics_in_first_day.to_i >= 10_000
+    SiteSetting.max_replies_in_first_day = 50 if SiteSetting.respond_to?(:max_replies_in_first_day=) && SiteSetting.max_replies_in_first_day.to_i >= 10_000
+    SiteSetting.max_topics_per_day = 100 if SiteSetting.respond_to?(:max_topics_per_day=) && SiteSetting.max_topics_per_day.to_i >= 10_000
   rescue => e
-    Rails.logger.warn("[Sorumatik OCR] Failed setting zero rate limits: #{e.message}")
+    Rails.logger.warn("[Sorumatik OCR] Failed restoring safe rate limits: #{e.message}")
   end
-
-  module ::SorumatikOcr::RateLimiterBypass
-    BYPASS_TYPES = %w[
-      create_topic
-      create-topic
-      create_post
-      create-post
-      sorumatik_ai_solve
-      first-day-topics-per-day
-      first-day-replies-per-day
-      topics-per-day
-      posts-per-day
-      unique-post
-      unique_post
-    ].freeze
-
-    def rate_unlimited?
-      return true if @user&.staff? || @user&.admin?
-      t = @type.to_s
-      return true if BYPASS_TYPES.include?(t)
-      return true if t.include?("create-topic") || t.include?("create_topic")
-      return true if t.include?("create-post") || t.include?("create_post")
-      return true if t.start_with?("user_api_") || t.start_with?("disabled_user_api") || t.include?("user_api")
-      return true if @error_code.to_s.start_with?("user_api_key_limiter") || @error_code.to_s.include?("user_api")
-      super
-    end
-
-    def can_perform?
-      return true if rate_unlimited?
-      super
-    end
-
-    def performed!(raise_error: true)
-      return true if rate_unlimited?
-      super
-    end
-
-    def seconds_to_wait
-      return 0 if rate_unlimited?
-      super
-    end
-  end
-  RateLimiter.prepend(SorumatikOcr::RateLimiterBypass)
 
   begin
+    require "digest"
     require_dependency "auth/default_current_user_provider"
     module ::SorumatikOcr::CurrentUserProviderBypass
       def user_api_key_limiter_60_secs
-        @user_api_key_limiter_60_secs ||= RateLimiter.new(nil, "disabled_user_api_min", 1_000_000, 1.minute)
+        raw_key = (@env && (@env["HTTP_USER_API_KEY"] || @env["USER_API_KEY"])).to_s
+        key_hash = Digest::SHA256.hexdigest(raw_key)[0, 16]
+        is_bus = @env && @env["PATH_INFO"].to_s.start_with?("/message-bus/")
+        limit = is_bus ? 10_000 : 2_500
+        @user_api_key_limiter_60_secs ||= RateLimiter.new(nil, "sorumatik_uapi_#{is_bus ? 'bus' : 'api'}_min_#{key_hash}", limit, 1.minute)
       end
 
       def user_api_key_limiter_1_day
-        @user_api_key_limiter_1_day ||= RateLimiter.new(nil, "disabled_user_api_day", 1_000_000, 1.day)
+        raw_key = (@env && (@env["HTTP_USER_API_KEY"] || @env["USER_API_KEY"])).to_s
+        key_hash = Digest::SHA256.hexdigest(raw_key)[0, 16]
+        is_bus = @env && @env["PATH_INFO"].to_s.start_with?("/message-bus/")
+        limit = is_bus ? 500_000 : 100_000
+        @user_api_key_limiter_1_day ||= RateLimiter.new(nil, "sorumatik_uapi_#{is_bus ? 'bus' : 'api'}_day_#{key_hash}", limit, 1.day)
       end
     end
     Auth::DefaultCurrentUserProvider.prepend(SorumatikOcr::CurrentUserProviderBypass)
@@ -108,61 +79,7 @@ after_initialize do
     Rails.logger.warn("[Sorumatik OCR] Failed to prepend CurrentUserProviderBypass: #{e.message}")
   end
 
-  module ::SorumatikOcr::ModelRateLimitBypass
-    def default_rate_limiter
-      nil
-    end
-  end
-  Topic.prepend(SorumatikOcr::ModelRateLimitBypass)
-  Post.prepend(SorumatikOcr::ModelRateLimitBypass)
-
-  module ::SorumatikOcr::NewPostManagerBypass
-    def initialize(user, args)
-      if args.is_a?(Hash) || args.respond_to?(:[]=)
-        args[:skip_rate_limits] = true
-        args["skip_rate_limits"] = true
-      end
-      super(user, args)
-      if @args.is_a?(Hash) || @args.respond_to?(:[]=)
-        @args[:skip_rate_limits] = true
-        @args["skip_rate_limits"] = true
-      end
-    end
-
-    def passes_rate_limit?(*)
-      true
-    end
-  end
-  NewPostManager.prepend(SorumatikOcr::NewPostManagerBypass)
-
   module ::SorumatikOcr::MobileSourceFields
-    def initialize(user, opts)
-      proto = (opts[:mobile_answer_protocol] || opts["mobile_answer_protocol"]).to_i
-      is_mobile = proto >= 2 ||
-                  (opts[:client_edge_solve] || opts["client_edge_solve"]).to_s == "true" ||
-                  (opts[:mobile_source] || opts["mobile_source"]).to_s == "true" ||
-                  (opts[:is_mobile] || opts["is_mobile"]).to_s == "true"
-      if is_mobile
-        opts[:skip_rate_limits] = true
-        opts["skip_rate_limits"] = true
-      end
-      super(user, opts)
-      if is_mobile
-        @skip_rate_limits = true
-      end
-    end
-
-    def passes_rate_limit?
-      proto = (@opts[:mobile_answer_protocol] || @opts["mobile_answer_protocol"]).to_i
-      is_mobile = proto >= 2 ||
-                  (@opts[:client_edge_solve] || @opts["client_edge_solve"]).to_s == "true" ||
-                  (@opts[:mobile_source] || @opts["mobile_source"]).to_s == "true" ||
-                  (@opts[:is_mobile] || @opts["is_mobile"]).to_s == "true" ||
-                  @opts[:skip_rate_limits] == true || @opts["skip_rate_limits"] == true
-      return true if is_mobile
-      super
-    end
-
     def setup_post
       super
       proto = @opts[:mobile_answer_protocol].to_i
@@ -177,6 +94,7 @@ after_initialize do
   end
   PostCreator.prepend(SorumatikOcr::MobileSourceFields)
 
+  require_relative "lib/sorumatik_ocr/security_policy"
   require_relative "app/controllers/sorumatik_ocr/ocr_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_solve_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_config_controller"
@@ -199,12 +117,16 @@ after_initialize do
     Rails.logger.warn("sorumatik_ai native_adapter_unavailable error=#{e.class}")
   end
 
-  # MessageBus channels for AI answer streaming (delivery audience is constrained at publish time)
+  # MessageBus channels for AI answer streaming: audience ACLs (user_ids / group_ids)
+  # are strictly constrained at publish time in SorumatikOcr::AiGeneration#publish!,
+  # avoiding JSON string/Hash mismatch or DB pool contention on the 80ms stream hot path.
   MessageBus.register_client_message_filter("/sorumatik/ai-answer/") do |_message|
     true
   end
 
   on(:post_created) do |post, _opts|
+    next if SorumatikOcr::SecurityPolicy.spam_or_ineligible_post?(post)
+
     proto = post.custom_fields["mobile_answer_protocol"].to_i
     proto = _opts[:mobile_answer_protocol].to_i if proto == 0 && _opts.is_a?(Hash)
 

@@ -3,6 +3,7 @@
 require "base64"
 require "digest"
 require "securerandom"
+require_relative "security_policy"
 
 module SorumatikOcr
   class AnswerGeneration
@@ -59,6 +60,7 @@ module SorumatikOcr
       return false unless SiteSetting.gemini_ai_solve_enabled && source&.user && source.topic
       return false unless source.post_type == Post.types[:regular] && source.deleted_at.nil?
       return false if source.user.username == SiteSetting.gemini_ai_solve_bot_username
+      return false if SecurityPolicy.spam_or_ineligible_post?(source)
       return false unless Guardian.new(source.user).can_see?(source.topic)
       return true if source.custom_fields["mobile_answer_protocol"].to_i >= 3
       return true if defined?(AiGeneration) && AiGeneration.respond_to?(:exists?) && AiGeneration.exists?(source_post_id: source.id)
@@ -70,14 +72,13 @@ module SorumatikOcr
 
     def self.start!(source, fallback: false)
       raise GeminiAnswerStream::Failure.new("client_owned_source") if !fallback && client_owned_source?(source)
+      raise GeminiAnswerStream::Failure.new("ineligible_source") if SecurityPolicy.spam_or_ineligible_post?(source)
       generation = nil
       source.with_lock do
         unless fallback || AiGeneration.exists?(source_post_id: source.id)
-          # Apply once for regular web entry points; fallbacks and mobile app requests must never be blocked by rate limits.
-          is_mobile = source.custom_fields["client_edge_solve"] == "true" || source.custom_fields["mobile_answer_protocol"].to_i >= 2
-          unless is_mobile
-            RateLimiter.new(source.user, "sorumatik_ai_solve", SiteSetting.gemini_ai_solve_rate_limit_per_minute, 1.minute).performed!
-          end
+          raw_limit = SiteSetting.respond_to?(:gemini_ai_solve_rate_limit_per_minute) ? SiteSetting.gemini_ai_solve_rate_limit_per_minute.to_i : 15
+          solve_limit = raw_limit <= 0 ? 15 : [raw_limit, 120].min
+          RateLimiter.new(source.user, "sorumatik_ai_solve", solve_limit, 1.minute).performed!
         end
         generation = AiGeneration.find_or_create_by!(source_post_id: source.id) do |g|
           g.topic_id = source.topic_id
@@ -103,10 +104,12 @@ module SorumatikOcr
               generation.update!(update_attrs)
             end
           elsif generation.state == "failed"
-            if generation.error&.dig("code") == "persistence_failed"
+            err_code = (generation.error&.dig("code") || generation.error&.dig(:code)).to_s
+            is_non_retryable = generation.error&.dig("retryable") == false || generation.error&.dig(:retryable) == false
+            if err_code == "persistence_failed"
               generation.update!(state: "persisting", error: nil, save_attempts: 0, sequence: generation.sequence + 1)
-            elsif fallback
-              # If fallback/recover is triggered for a failed generation, retry it cleanly
+            elsif fallback && !is_non_retryable
+              # Retry failed generation only when the failure was marked retryable
               generation.update!(state: !generation.raw.to_s.empty? ? "persisting" : "queued", error: nil, sequence: generation.sequence + 1)
             end
           end
@@ -230,24 +233,40 @@ module SorumatikOcr
       @generation.publish!
       source = @generation.source_post
       raise GeminiAnswerStream::Failure.new("access_revoked") unless source && source.deleted_at.nil? && Guardian.new(source.user).can_see?(source.topic)
+      raise GeminiAnswerStream::Failure.new("ineligible_source") if SecurityPolicy.spam_or_ineligible_post?(source)
       is_fallback = @generation.metrics&.[]("fallback") == true
       raise GeminiAnswerStream::Failure.new("client_owned_source") if !is_fallback && self.class.client_owned_source?(source)
       key = SorumatikOcr.resolve_api_key
       raise GeminiAnswerStream::Failure.new("missing_api_key") if key.to_s.strip.empty?
-      model = SiteSetting.gemini_ai_solve_model
+      model = SecurityPolicy.resolve_text_model(
+        nil,
+        site_setting: SiteSetting,
+        setting_model: SiteSetting.gemini_ai_solve_model,
+        fallback: "gemini-2.5-flash"
+      )
       prompt = SiteSetting.gemini_ai_solve_system_prompt
       @metrics.merge!("model" => model, "prompt_sha256" => Digest::SHA256.hexdigest(prompt))
       contents = build_contents(source)
       @metrics["images_ready_ms"] = elapsed
-      level = SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) ? SiteSetting.gemini_ai_solve_thinking_level.to_s.strip : "default"
-      gen_config = { maxOutputTokens: 16_384 }
-      if !level.to_s.empty? && level != "default"
-        if model.to_s.start_with?("gemini-2.5")
-          gen_config[:thinkingConfig] = { thinkingBudget: (level == "minimal" ? 0 : -1) }
-        else
-          effective_level = (level == "minimal" && model.to_s =~ /gemini-3\.(?:[78]|1-pro)/) ? "low" : level
-          gen_config[:thinkingConfig] = { thinkingLevel: effective_level }
+      raw_level = SiteSetting.respond_to?(:gemini_ai_solve_thinking_level) ? SiteSetting.gemini_ai_solve_thinking_level.to_s.strip.downcase : "low"
+      level = %w[default minimal low medium high].include?(raw_level) ? raw_level : "low"
+      gen_config = { maxOutputTokens: 8_192 }
+      if model.to_s.start_with?("gemini-2.5")
+        if level != "default"
+          budget = case level
+                   when "minimal" then 0
+                   when "low" then 1024
+                   when "medium" then 2048
+                   else 4096
+                   end
+          gen_config[:thinkingConfig] = { thinkingBudget: budget }
         end
+      elsif model.to_s.start_with?("gemini-3")
+        effective_level = level == "default" ? "low" : level
+        if effective_level == "minimal" && model.to_s.match?(/gemini-3\.(?:[78]|1)/)
+          effective_level = "low"
+        end
+        gen_config[:thinkingConfig] = { thinkingLevel: effective_level }
       end
 
       payload = {
@@ -305,7 +324,7 @@ module SorumatikOcr
       unless @generation.terminal?
         current_attempts = @generation.respond_to?(:attempts) ? @generation.attempts.to_i : 1
         is_transient = (e.respond_to?(:retryable) && e.retryable) ||
-                       %w[provider_429 provider_500 provider_502 provider_503 provider_504 upstream_429 upstream_503 provider_connection_failed generation_timeout].include?(code.to_s)
+                       %w[provider_429 provider_500 provider_502 provider_503 provider_504 upstream_429 upstream_503 provider_connection_failed].include?(code.to_s)
         
         if is_transient && current_attempts < MAX_GENERATION_ATTEMPTS
           @generation.update!(
@@ -442,10 +461,13 @@ module SorumatikOcr
                 url = Discourse.store.cdn_url(upload.url)
                 url = "https:#{url}" if url.start_with?("//")
                 url = "#{Discourse.base_url}#{url}" unless url.start_with?("http")
-                uri = URI(url)
-                response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: 5, read_timeout: 5) { |http| http.get(uri.request_uri) }
-                raise GeminiAnswerStream::Failure.new("image_unavailable") unless response.is_a?(Net::HTTPSuccess)
-                response.body
+                fetched = SecurityPolicy.fetch_safe_image_bytes(
+                  url,
+                  max_bytes: 10.megabytes,
+                  timeout_seconds: [remaining, 5].min
+                )
+                raise GeminiAnswerStream::Failure.new("image_unavailable") unless fetched
+                fetched
               end
             end
             raise GeminiAnswerStream::Failure.new("image_too_large") if bytes.bytesize > 10.megabytes
@@ -453,10 +475,10 @@ module SorumatikOcr
             parts << { inline_data: { mime_type: mime, data: Base64.strict_encode64(bytes) } }
           end
 
-          # Fallback: if post.uploads is empty, extract image URLs directly from markdown raw
+          # Fallback: if post.uploads is empty, extract image URLs from markdown raw (strictly SSRF-filtered to Sorumatik/CDN hosts)
           if parts.none? { |p| p.key?(:inline_data) }
-            image_urls = post.raw.to_s.scan(/!\[.*?\]\(((?:https?:)?\/\/[^\s\)]+)\)/i).flatten
-            image_urls.each do |raw_url|
+            image_urls = post.raw.to_s.scan(/!\[.*?\]\(((?:https?:)?\/\/[^\s\)]+|\/uploads\/[^\s\)]+)\)/i).flatten
+            image_urls.first(4).each do |raw_url|
               url = raw_url.to_s.strip
               url = "https:#{url}" if url.start_with?("//")
               url = "#{Discourse.base_url}#{url}" unless url.start_with?("http")
@@ -466,24 +488,24 @@ module SorumatikOcr
               begin
                 remaining = @deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
                 next if remaining <= 0
-                bytes = Timeout.timeout([remaining, 10].min) do
-                  uri = URI(url)
-                  response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: 5, read_timeout: 5) { |http| http.get(uri.request_uri) }
-                  response.is_a?(Net::HTTPSuccess) ? response.body : nil
-                end
+                bytes = SecurityPolicy.fetch_safe_image_bytes(
+                  url,
+                  max_bytes: 10.megabytes,
+                  timeout_seconds: [remaining, 5].min
+                )
                 if bytes && bytes.bytesize <= 10.megabytes
                   mime = ext == "png" ? "image/png" : ext == "webp" ? "image/webp" : "image/jpeg"
                   parts << { inline_data: { mime_type: mime, data: Base64.strict_encode64(bytes) } }
                   break
                 end
               rescue => img_err
-                Rails.logger.warn("[Sorumatik AI] Failed to fetch raw markdown image #{url}: #{img_err.message}")
+                Rails.logger.warn("[Sorumatik AI] Failed to fetch raw markdown image: #{img_err.class}")
               end
             end
           end
         end
 
-        raw_text = post.raw.to_s.strip
+        raw_text = post.raw.to_s.strip[0, 15_000]
         parts << { text: raw_text } unless raw_text.empty?
         next if parts.empty?
 

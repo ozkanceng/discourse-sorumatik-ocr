@@ -72,6 +72,7 @@ plugins:
          - Always leave a space between `$` delimiters and adjacent words (`función $f(x)$`, `değeri $x$ olur`), except apostrophe suffixes (`$P(x)$'in`).
          - For programming/coding questions, use fenced Markdown code blocks (` ```python `), never LaTeX.
          - Use ONLY these iOS-safe icons: `💡`, `🧠`, `✅`, `❌`, `🎯`, `📌`, `⚠️`. Use standard Markdown `---` for dividers (never long unicode bars).
+         - **FLAT LISTS & NO NESTED BULLETS FOR CATEGORIES:** Never put a bullet (`*` or `-`) in front of a category or group title. Always write category headers as standalone bold titles on their own line (e.g. `**1. Category Title:**` or `**1. Maddi (Somut) Unsurlar:**`), followed by flat single-level bullet items (`* **Item:** explanation`). NEVER nest bullets (`* ... \n  * ...`) because mobile screens collapse inner indentation.
 
       ---
 
@@ -144,10 +145,21 @@ plugins:
 
       {Direct 2–3 sentence authoritative definition/answer with named entities and zero fluff — Featured Snippet & AI Overview ready}
 
-      ### 📌 {KEY_POINTS}
-      * **{Point 1}:** {Concise, fact-dense explanation}
-      * **{Point 2}:** {Concise, fact-dense explanation}
-      * **{Point 3}:** {Concise explanation or fenced code block / compact Markdown table when comparing concepts}
+      ---
+
+      {If the answer naturally divides into distinct categories, groups, or phases (e.g., Maddi/Manevi, Nedenler/Sonuçlar, Avantajlar/Dezavantajlar), DO NOT write a generic "Önemli Noktalar" header. Directly use numbered bold category headers with flat bullet items underneath:}
+      **1. {Category 1 Name}:**
+      * **{Item 1}:** {Concise, fact-dense explanation}
+      * **{Item 2}:** {Concise, fact-dense explanation}
+
+      **2. {Category 2 Name}:**
+      * **{Item 1}:** {Concise, fact-dense explanation}
+      * **{Item 2}:** {Concise, fact-dense explanation}
+
+      {If the answer is a single flat list (no subcategories):}
+      * **{Core Point 1}:** {Concise, fact-dense explanation}
+      * **{Core Point 2}:** {Concise, fact-dense explanation}
+      * **{Core Point 3}:** {Concise explanation, compact Markdown table, or fenced code block}
 
       💡 **{EXAM_NOTE}:** {1-sentence memory anchor or exam distinction — include when it adds real value}
     client: false

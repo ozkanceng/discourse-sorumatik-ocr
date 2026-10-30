@@ -113,9 +113,8 @@ class ThinkingConfigTest < Minitest::Test
     assert_equal "gemini-3.1-flash-lite", plugins.dig("gemini_ocr_model", "default")
     assert_equal "default", plugins.dig("gemini_ai_solve_thinking_level", "default")
     prompt = plugins.dig("gemini_ai_solve_system_prompt", "default").to_s
-    assert_includes prompt, "EduMax AI — Sorumatik Expert Teacher System Prompt"
-    assert_includes prompt, "STRICT TARGET-LANGUAGE & REGIONAL CURRICULUM LOCK"
-    assert_includes prompt, "GEO (GENERATIVE ENGINE OPTIMIZATION)"
+    assert_includes prompt, "You are an expert pedagogical teacher on Sorumatik"
+    assert_includes prompt, "Solve the question step-by-step"
 
     mock_setting = Struct.new(:gemini_ocr_model, :gemini_ai_allowed_models).new(nil, nil)
     resolved_ocr = SorumatikOcr::SecurityPolicy.resolve_ocr_model(

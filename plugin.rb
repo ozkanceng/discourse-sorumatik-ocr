@@ -95,6 +95,7 @@ after_initialize do
   PostCreator.prepend(SorumatikOcr::MobileSourceFields)
 
   require_relative "lib/sorumatik_ocr/security_policy"
+  require_relative "lib/sorumatik_ocr/proxy_capacity"
   require_relative "app/controllers/sorumatik_ocr/ocr_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_solve_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_config_controller"
@@ -188,6 +189,7 @@ after_initialize do
     post "/save-solution" => "ai_config#save_solution"
     get  "/ai-generations/active" => "ai_generations#active"
     post "/ai-generations" => "ai_generations#create"
+    post "/ai-generations/claim" => "ai_generations#claim"
     get  "/ai-generations/by-source/:source_post_id" => "ai_generations#by_source"
     get  "/ai-generations/by-topic/:topic_id" => "ai_generations#by_topic"
     get  "/ai-generations/:id" => "ai_generations#show"

@@ -198,7 +198,7 @@ module SorumatikOcr
         end
       end
       previous = AiGeneration.find_by(source_post_id: source.id)
-      generation = AnswerGeneration.import!(source, content)
+      generation = AnswerGeneration.import!(source, content, claim_token: params[:claim_token])
       duplicate = previous && previous.post_id.present? && previous.post_id == generation.post_id
       render json: generation.snapshot.merge(success: generation.state == "completed", duplicate: !!duplicate),
              status: generation.state == "completed" ? 200 : 202

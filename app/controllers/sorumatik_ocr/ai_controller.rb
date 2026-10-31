@@ -594,6 +594,12 @@ module SorumatikOcr
     end
 
     def stream_gemini_sse(model, api_key, payload)
+      slot = ProxyCapacity.acquire
+      unless slot
+        response.headers["Retry-After"] = "5"
+        return render json: { success: false, error: "proxy_busy" }, status: 503
+      end
+
       response.headers["Content-Type"] = "text/event-stream"
       response.headers["Cache-Control"] = "no-cache"
       response.headers["X-Accel-Buffering"] = "no"
@@ -622,7 +628,10 @@ module SorumatikOcr
       Rails.logger.error("[Sorumatik AI Proxy SSE Hatası] #{e.class}: #{e.message}")
       response.stream.write("data: #{ { error: "Akış bağlantısı kesildi" }.to_json }\n\n")
     ensure
-      response.stream.close rescue nil
+      if slot
+        ProxyCapacity.release(slot)
+        response.stream.close rescue nil
+      end
     end
 
     def sanitize_wav_base64(raw_base64)

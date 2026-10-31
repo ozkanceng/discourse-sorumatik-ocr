@@ -134,7 +134,70 @@ module SorumatikOcr
       generation
     end
 
-    def self.import!(source, raw)
+    CLIENT_CLAIM_TOKEN = /\A[A-Za-z0-9_-]{16,64}\z/
+
+    def self.client_execution_id(token)
+      "client-#{token}"
+    end
+
+    def self.client_claimed?(generation, token)
+      !token.to_s.empty? && generation.state == "generating" &&
+        generation.execution_id == client_execution_id(token)
+    end
+
+    # Hands a generation that has produced no text yet to the mobile client.
+    # The worker only claims "queued" rows, so it skips a client-owned
+    # "generating" row; if the client disappears, stale-heartbeat recovery
+    # fails it as retryable and the server generates the answer again.
+    def self.client_claim!(source, token)
+      raise GeminiAnswerStream::Failure.new("invalid_claim_token") unless token.to_s.match?(CLIENT_CLAIM_TOKEN)
+      generation = nil
+      claimed = false
+      source.with_lock do
+        generation = AiGeneration.find_or_create_by!(source_post_id: source.id) do |g|
+          g.topic_id = source.topic_id
+          g.user_id = source.user_id
+        end
+        generation.with_lock do
+          no_text = generation.raw.to_s.strip.empty? && generation.post_id.nil?
+          claimable = client_claimed?(generation, token) ||
+                      (no_text && %w[queued failed].include?(generation.state))
+          if claimable
+            attrs = { state: "generating", error: nil, sequence: generation.sequence + 1 }
+            attrs[:execution_id] = client_execution_id(token) if generation.respond_to?(:execution_id)
+            attrs[:heartbeat_at] = Time.current if generation.respond_to?(:heartbeat_at)
+            generation.update!(attrs)
+            claimed = true
+          end
+        end
+      end
+      generation.publish! if claimed
+      [generation, claimed]
+    end
+
+    # Returns a client-owned generation to the server queue when the client
+    # cannot generate (for example when the proxy is full).
+    def self.client_release!(source, token)
+      generation = AiGeneration.find_by(source_post_id: source.id)
+      return [nil, false] unless generation
+      released = false
+      generation.with_lock do
+        if client_claimed?(generation, token) && generation.raw.to_s.strip.empty?
+          attrs = { state: "queued", sequence: generation.sequence + 1 }
+          attrs[:execution_id] = nil if generation.respond_to?(:execution_id)
+          attrs[:heartbeat_at] = nil if generation.respond_to?(:heartbeat_at)
+          generation.update!(attrs)
+          released = true
+        end
+      end
+      if released
+        generation.publish!
+        Jobs.enqueue(:sorumatik_generate_answer, generation_id: generation.id)
+      end
+      [generation, released]
+    end
+
+    def self.import!(source, raw, claim_token: nil)
       generation = nil
       cleaned_raw = raw.to_s.gsub("\r\n", "\n").strip
       return nil if cleaned_raw.empty?
@@ -142,7 +205,7 @@ module SorumatikOcr
       source.with_lock do
         generation = AiGeneration.find_by(source_post_id: source.id)
         if generation
-          if generation.state == "generating"
+          if generation.state == "generating" && !client_claimed?(generation, claim_token)
             raise GeminiAnswerStream::Failure.new("answer_in_progress")
           end
           if generation.state == "completed" && generation.post_id

@@ -6,7 +6,7 @@ module SorumatikOcr
     skip_before_action :check_xhr
     skip_before_action :verify_authenticity_token
     skip_before_action :redirect_to_login_if_required
-    before_action :ensure_logged_in, only: %i[active create]
+    before_action :ensure_logged_in, only: %i[active create claim]
 
     def active
       recent_generations = AiGeneration.where(user_id: current_user.id)
@@ -49,6 +49,50 @@ module SorumatikOcr
       render_json_error(I18n.t("sorumatik_ocr.rate_limited", default: "Çok fazla istek gönderildi. Lütfen biraz bekleyin."), status: 429)
     rescue GeminiAnswerStream::Failure => e
       render json: { success: false, error: e.code }, status: 409
+    end
+
+    # POST /sorumatik/ai-generations/claim
+    # The mobile client asks to generate an answer the server has not started.
+    # 409 means the server keeps ownership and the client keeps watching.
+    def claim
+      raise Discourse::InvalidAccess unless SecurityPolicy.active_user?(current_user)
+      unless SecurityPolicy.same_origin_request?(request, current_user: current_user)
+        return render_json_error("Geçersiz istek kaynağı (CSRF koruması)", status: 403)
+      end
+
+      RateLimiter.new(current_user, "sorumatik_ai_gen_claim", 20, 1.minute).performed!
+
+      source = Post.find_by(id: params[:source_post_id])
+      source ||= Topic.find_by(id: params[:topic_id])&.first_post if params[:source_post_id].blank?
+      raise Discourse::NotFound unless source && source.topic_id == params[:topic_id].to_i
+      raise Discourse::InvalidAccess unless source.deleted_at.nil? && source.post_type == Post.types[:regular]
+      guardian.ensure_can_see!(source.topic)
+      raise Discourse::InvalidAccess unless source.user_id == current_user.id
+
+      if params[:release].to_s == "true"
+        generation, released = AnswerGeneration.client_release!(source, params[:claim_token])
+        raise Discourse::NotFound unless generation
+        return render json: generation.snapshot.merge(released: released)
+      end
+
+      unless SiteSetting.gemini_ai_solve_enabled
+        return render_json_error("AI solve is disabled", status: 503)
+      end
+      if SecurityPolicy.spam_or_ineligible_post?(source)
+        return render_json_error("Source post is not eligible for AI generation", status: 422)
+      end
+      # Do not hand work to a proxy that cannot take another stream.
+      unless ProxyCapacity.available?
+        response.headers["Retry-After"] = "10"
+        return render json: { success: false, error: "proxy_busy" }, status: 503
+      end
+
+      generation, claimed = AnswerGeneration.client_claim!(source, params[:claim_token])
+      render json: generation.snapshot.merge(claimed: claimed), status: claimed ? 200 : 409
+    rescue RateLimiter::LimitExceeded
+      render_json_error(I18n.t("sorumatik_ocr.rate_limited", default: "Çok fazla istek gönderildi. Lütfen biraz bekleyin."), status: 429)
+    rescue GeminiAnswerStream::Failure => e
+      render json: { success: false, error: e.code }, status: 422
     end
 
     def by_source

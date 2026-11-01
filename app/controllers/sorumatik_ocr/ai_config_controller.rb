@@ -51,12 +51,23 @@ module SorumatikOcr
         bot_avatar_url = "#{Discourse.base_url}#{bot_avatar_url}" if bot_avatar_url.start_with?("/")
       end
 
-      # SECURITY: İstemciye asla Gemini API anahtarı sızdırılmaz.
+      # Protocol 4: signed-in mobile apps generate answers on the device with
+      # Gemini and only save the result, so the key goes to active users only.
+      client_generation = SiteSetting.respond_to?(:sorumatik_client_generation_enabled) &&
+                          SiteSetting.sorumatik_client_generation_enabled &&
+                          SecurityPolicy.active_user?(current_user)
+      mobile_api_key = client_generation ? SorumatikOcr.resolve_mobile_api_key : ""
+      client_generation &&= mobile_api_key.present?
+
+      # SECURITY: Anahtar yalnızca protokol 4 için giriş yapmış aktif kullanıcıya gider.
       # İstemciler her zaman sunucu proxy (/sorumatik/ai/generate, /sorumatik/ocr) üzerinden çalışmalıdır.
       render json: {
         success: true,
-        mobile_answer_protocol: 3,
-        server_generation: true,
+        # Older apps compare the protocol with >= 3 and keep server generation.
+        mobile_answer_protocol: client_generation ? AnswerGeneration::CLIENT_GENERATION_PROTOCOL : 3,
+        server_generation: !client_generation,
+        client_generation: !!client_generation,
+        client_heartbeat_seconds: 20,
         enabled: !!enabled,
         save_solution_enabled: true,
         proxy: true,
@@ -72,7 +83,7 @@ module SorumatikOcr
         tts_model: tts_model,
         blackboard_model: blackboard_model,
         blackboard_thinking_level: blackboard_thinking_level,
-        api_key: ""
+        api_key: client_generation ? mobile_api_key : ""
       }
     rescue => err
       Rails.logger.error("[Sorumatik AI Config] Error: #{err.class}: #{err.message}")
@@ -181,12 +192,17 @@ module SorumatikOcr
       end
 
       RateLimiter.new(current_user, "sorumatik_save_solution_min", 20, 1.minute).performed!
+      RateLimiter.new(current_user, "sorumatik_save_solution_day", 200, 1.day).performed!
 
       topic = Topic.find_by(id: params[:topic_id])
       raise Discourse::NotFound unless topic
       guardian.ensure_can_see!(topic)
       source = params[:source_post_id].present? ? topic.posts.find(params[:source_post_id]) : topic.first_post
       raise Discourse::InvalidAccess unless source && source.deleted_at.nil? && source.post_type == Post.types[:regular] && source.user_id == current_user.id
+      # The saved text is published under the bot account, so spam sources never get one.
+      if SecurityPolicy.spam_or_ineligible_post?(source)
+        return render_json_error("Source post is not eligible for AI generation", status: 422)
+      end
       content = params[:content].to_s.gsub("\r\n", "\n").strip
       return render_json_error("Content is required", status: 400) if content.blank?
       return render_json_error("Content exceeds maximum allowed length", status: 413) if content.length > MAX_STUDY_CONTENT_CHARS

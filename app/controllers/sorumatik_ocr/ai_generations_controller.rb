@@ -81,8 +81,10 @@ module SorumatikOcr
       if SecurityPolicy.spam_or_ineligible_post?(source)
         return render_json_error("Source post is not eligible for AI generation", status: 422)
       end
-      # Do not hand work to a proxy that cannot take another stream.
-      unless ProxyCapacity.available?
+      # Do not hand work to a proxy that cannot take another stream. Protocol 4
+      # devices call Gemini directly, not through the proxy.
+      device_generates = source.custom_fields["mobile_answer_protocol"].to_i >= AnswerGeneration::CLIENT_GENERATION_PROTOCOL
+      unless device_generates || ProxyCapacity.available?
         response.headers["Retry-After"] = "10"
         return render json: { success: false, error: "proxy_busy" }, status: 503
       end

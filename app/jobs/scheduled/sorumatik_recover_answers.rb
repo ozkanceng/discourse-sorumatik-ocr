@@ -7,6 +7,9 @@ module ::Jobs
     MAX_RECOVER_ATTEMPTS = 2
 
     def execute(_args)
+      # 0. Hand device-generated answers whose heartbeat stopped back to the server
+      recover_stale_client_generations!
+
       stale_cutoff = (SorumatikOcr::AnswerGeneration::MAX_SECONDS + 15).seconds.ago
       has_heartbeat = SorumatikOcr::AiGeneration.respond_to?(:column_names) &&
                       SorumatikOcr::AiGeneration.column_names.include?("heartbeat_at")
@@ -35,6 +38,36 @@ module ::Jobs
     end
 
     private
+
+    def recover_stale_client_generations!
+      return unless SorumatikOcr::AiGeneration.column_names.include?("execution_id")
+      cutoff = SorumatikOcr::AnswerGeneration.client_heartbeat_timeout.seconds.ago
+      SorumatikOcr::AiGeneration
+        .where(state: "generating")
+        .where("execution_id LIKE 'client-%'")
+        .where("COALESCE(heartbeat_at, updated_at) < ?", cutoff)
+        .find_each do |generation|
+          source = generation.source_post
+          # Only protocol 4 devices heartbeat; older takeover claims keep the
+          # long stale cutoff below.
+          next unless source && source.custom_fields["mobile_answer_protocol"].to_i >= SorumatikOcr::AnswerGeneration::CLIENT_GENERATION_PROTOCOL
+          interrupted = false
+          generation.with_lock do
+            last_touch = generation.heartbeat_at || generation.updated_at
+            next unless generation.state == "generating" &&
+                        generation.execution_id.to_s.start_with?("client-") &&
+                        last_touch < cutoff
+            generation.update!(state: "failed", sequence: generation.sequence + 1,
+                               error: { code: "worker_interrupted", message: "Cihazdan yanıt gelmedi.", retryable: true })
+            interrupted = true
+          end
+          next unless interrupted
+          generation.publish!
+          SorumatikOcr::AnswerGeneration.start!(source, fallback: true)
+        rescue StandardError => e
+          Rails.logger.warn("[Sorumatik AI] Client generation takeover failed for #{generation.generation_id}: #{e.class} - #{e.message}")
+        end
+    end
 
     def recover_failed_generations!
       SorumatikOcr::AiGeneration

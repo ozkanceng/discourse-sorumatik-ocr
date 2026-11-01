@@ -1,3 +1,41 @@
+# Mobil canlı cevap: protokol 4 (cihazda üretim)
+
+`sorumatik_client_generation_enabled` açıkken `GET /sorumatik/ai-config`, giriş
+yapmış aktif kullanıcıya `mobile_answer_protocol: 4`, `client_generation: true`,
+`server_generation: false`, `client_heartbeat_seconds: 20` ve Gemini anahtarını
+(`sorumatik_mobile_gemini_api_key`) döner. Bu ayar boşsa protokol 4 kapalıdır;
+sunucu anahtarı hiçbir zaman cihaza gönderilmez. Anahtar
+Google Cloud'da uygulama paketlerine kısıtlanmalıdır; uygulama
+`X-Android-Package` + `X-Android-Cert` (çalışma anında okunan imza SHA-1) veya
+`X-Ios-Bundle-Identifier` başlıklarını gönderir. Eski uygulamalar protokolü
+`>= 3` ile karşılaştırdığı için sunucu üretimiyle çalışmaya devam eder.
+
+Akış:
+
+1. Uygulama soruyu veya takip mesajını `mobile_answer_protocol=4`,
+   `client_edge_solve=true` ile oluşturur. `client_owned_source?` bu kaynakları
+   süre sınırı olmadan cihaza ait sayar; `post_created` sunucu üretimini
+   başlatmaz, 45 sn sonra `sorumatik_fallback_answer` işini planlar.
+2. Uygulama hemen `POST /sorumatik/ai-generations/claim` çağırır. Satır
+   `generating` ve `execution_id=client-<token>` olur. Protokol 4 claim'i vekil
+   kapasitesine bakmaz.
+3. Uygulama Gemini'den doğrudan akıtır; claim'i aynı token ile her 20 sn
+   yenileyerek `heartbeat_at` değerini tazeler.
+4. Bitince `POST /sorumatik/save-solution` `claim_token` ile kaydedilir.
+   Sunucu bot gönderisini tek seferde oluşturur.
+
+Sunucunun devraldığı durumlar:
+
+- Cihaz hiç claim etmediyse yedek iş 45 sn sonra `start!(fallback: true)` çağırır.
+- Metin gelmeden hata olursa uygulama `release=true` ile bırakır; iş hemen kuyruğa döner.
+- Kalp atışı `sorumatik_client_heartbeat_timeout_seconds` (60) boyunca gelmezse
+  `SorumatikRecoverAnswers` satırı `worker_interrupted` yapıp sunucu üretimini başlatır.
+- Sunucu devraldıktan sonra gelen geç kayıt `409` alır; "Yeniden dene" sunucunun
+  cevabını yükler.
+
+Sunucu yedek üretiminde MessageBus 250 ms'de bir yayınlanır, satır ise
+2 sn'de bir ve bitişte yazılır.
+
 # Mobil canlı cevap: protokol 2 ve yayınlama
 
 ## Akış ve sahiplik

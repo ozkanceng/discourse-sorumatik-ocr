@@ -24,6 +24,10 @@ en:
     sorumatik_ai_generation_streaming_enabled: "[Sorumatik OCR & AI] Deliver live AI generations through MessageBus"
     sorumatik_ai_generation_streaming_percent: "[Sorumatik OCR & AI] Percentage of users receiving live AI generation events (0-100)"
     gemini_legacy_client_fallback: "[Sorumatik OCR & AI] Return API key to legacy mobile clients (keep false for security)"
+    sorumatik_client_generation_enabled: "[Sorumatik OCR & AI] Mobile app generates AI answers on the device with Gemini and saves them (protocol 4). Turn off to fall back to server generation"
+    sorumatik_client_heartbeat_timeout_seconds: "[Sorumatik OCR & AI] Seconds without a device heartbeat before the server takes over a device-generated answer"
+    sorumatik_mobile_gemini_api_key: "[Sorumatik OCR & AI] Optional Gemini API key sent to signed-in mobile users for on-device answers (restrict it to the app packages in Google Cloud). Empty = protocol 4 stays off and the server keeps generating"
+    gemini_ai_proxy_max_concurrent_streams: "[Sorumatik OCR & AI] Maximum concurrent Gemini streams through the AI proxy across all web workers (about half of UNICORN_WORKERS)"
   sorumatik_ocr:
     api_key_missing: "Gemini OCR API key is not configured on the server."
     image_missing: "No image file provided in request."

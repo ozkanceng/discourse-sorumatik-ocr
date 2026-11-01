@@ -19,9 +19,11 @@ module ::Jobs
       return unless bot
       return if post.user_id == bot.id
 
-      # If topic already has an answer from the bot after this post, don't generate again
-      has_bot_answer = topic.posts.where(user_id: bot.id).where("post_number > ?", post.post_number).exists?
-      return if has_bot_answer
+      # If the bot already answered this post, don't generate again. Follow-ups
+      # are matched by reply target so an answer to another message doesn't count.
+      replies = topic.posts.where(user_id: bot.id).where("post_number > ?", post.post_number)
+      replies = replies.where(reply_to_post_number: post.post_number == 1 ? [nil, 1] : post.post_number)
+      return if replies.exists?
 
       # If there is already an active, completed, or non-retryably failed generation for this source post, do not duplicate
       generation = SorumatikOcr::AiGeneration.find_by(source_post_id: post.id)

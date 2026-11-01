@@ -107,6 +107,13 @@ class ServerAnswerLifecycleTest < Minitest::Test
     def update_columns(attrs)
       update!(attrs)
     end
+    def assign_attributes(attrs)
+      attrs.each { |k, v| send("#{k}=", v) if respond_to?("#{k}=") }
+    end
+    def save!
+      (@saves ||= []) << raw
+    end
+    def saves; @saves || []; end
   end
 
   def setup
@@ -138,6 +145,56 @@ class ServerAnswerLifecycleTest < Minitest::Test
     }, Time.now)
 
     assert SorumatikOcr::AnswerGeneration.managed_source?(source)
+  end
+
+  def protocol_4_source(age_seconds: 0)
+    topic = FakeTopic.new(100, nil, {}, [])
+    FakeSource.new(10, 100, 1, 1, 1, nil, FakeUser.new(1, "alice"), topic, "Question", {
+      "mobile_answer_protocol" => "4",
+      "client_edge_solve" => "true"
+    }, Time.now - age_seconds)
+  end
+
+  def test_protocol_4_is_client_owned_without_a_lease
+    assert SorumatikOcr::AnswerGeneration.client_owned_source?(protocol_4_source)
+    assert SorumatikOcr::AnswerGeneration.client_owned_source?(protocol_4_source(age_seconds: 3600))
+  end
+
+  def test_protocol_4_is_not_started_by_the_server
+    source = protocol_4_source
+    refute SorumatikOcr::AnswerGeneration.managed_source?(source)
+    error = assert_raises(SorumatikOcr::GeminiAnswerStream::Failure) do
+      SorumatikOcr::AnswerGeneration.start!(source)
+    end
+    assert_equal "client_owned_source", error.code
+  end
+
+  def test_protocol_4_without_client_flag_stays_server_owned
+    source = protocol_4_source
+    source.custom_fields["client_edge_solve"] = "false"
+    refute SorumatikOcr::AnswerGeneration.client_owned_source?(source)
+  end
+
+  def test_client_heartbeat_timeout_defaults_to_60_seconds
+    assert_equal 60, SorumatikOcr::AnswerGeneration.client_heartbeat_timeout
+  end
+
+  def test_snapshot_without_persist_publishes_without_writing
+    gen = FakeGeneration.new(
+      1, "gen-uuid", 100, 10, 1, nil,
+      "generating", 3, "", {}, nil, 0,
+      nil, "worker-1", Time.now, false, 1,
+      Time.now, Time.now, nil
+    )
+    published = []
+    gen.define_singleton_method(:publish!) { published << [raw, sequence] }
+    runner = SorumatikOcr::AnswerGeneration.new(gen)
+
+    runner.send(:save_snapshot!, "Kısmi", persist: false)
+    runner.send(:save_snapshot!, "Kısmi cevap", persist: true)
+
+    assert_equal [["Kısmi", 4], ["Kısmi cevap", 5]], published
+    assert_equal ["Kısmi cevap"], gen.saves
   end
 
   def test_incomplete_provider_cannot_be_persisted_as_completed

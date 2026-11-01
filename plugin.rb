@@ -21,6 +21,14 @@ after_initialize do
       key.to_s.strip
     end
 
+    # Key handed to signed-in mobile apps for on-device answers (protocol 4).
+    # It never falls back to the server key: a key the server can use is not
+    # restricted to the app packages, so it must not ship to devices.
+    def self.resolve_mobile_api_key
+      key = SiteSetting.respond_to?(:sorumatik_mobile_gemini_api_key) && SiteSetting.sorumatik_mobile_gemini_api_key.presence
+      key.to_s.strip
+    end
+
     class Engine < ::Rails::Engine
       engine_name PLUGIN_NAME
       isolate_namespace SorumatikOcr
@@ -130,6 +138,13 @@ after_initialize do
 
     proto = post.custom_fields["mobile_answer_protocol"].to_i
     proto = _opts[:mobile_answer_protocol].to_i if proto == 0 && _opts.is_a?(Hash)
+
+    # Protokol 4: cevabı cihaz üretip kaydeder. Cihaz hiç sahiplenmezse yedek
+    # iş, sinyali kesilirse kurtarma işi sunucu üretimini başlatır.
+    if proto >= SorumatikOcr::AnswerGeneration::CLIENT_GENERATION_PROTOCOL && post.custom_fields["client_edge_solve"] == "true"
+      Jobs.enqueue_in(45.seconds, :sorumatik_fallback_answer, post_id: post.id)
+      next
+    end
 
     # Eski Protokol 2 cihaz üstü istemci akışı (yedek 95 saniye fallback):
     if proto == 2 && post.custom_fields["client_edge_solve"] == "true"

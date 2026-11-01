@@ -11,6 +11,12 @@ module SorumatikOcr
     CLIENT_LEASE_SECONDS = 90
     MAX_GENERATION_ATTEMPTS = 3
     MAX_SAVE_ATTEMPTS = 3
+    # Protocol 4: the device generates the answer and saves it; the server only
+    # takes over through the fallback job or stale-heartbeat recovery.
+    CLIENT_GENERATION_PROTOCOL = 4
+    DEFAULT_CLIENT_HEARTBEAT_TIMEOUT = 60
+    PUBLISH_INTERVAL_MS = 250
+    PERSIST_INTERVAL_MS = 2000
 
     def self.resolve_solve_max_output_tokens(model, level = "default")
       m = model.to_s.strip.downcase
@@ -22,10 +28,17 @@ module SorumatikOcr
       end
     end
 
+    def self.client_heartbeat_timeout
+      value = SiteSetting.respond_to?(:sorumatik_client_heartbeat_timeout_seconds) ? SiteSetting.sorumatik_client_heartbeat_timeout_seconds.to_i : 0
+      value > 0 ? value : DEFAULT_CLIENT_HEARTBEAT_TIMEOUT
+    end
+
     def self.client_owned_source?(source, lease_seconds: CLIENT_LEASE_SECONDS)
       return false unless source
-      # Protocol 3 and above is strictly server-owned and generated on the server!
-      return false if source.custom_fields["mobile_answer_protocol"].to_i >= 3
+      protocol = source.custom_fields["mobile_answer_protocol"].to_i
+      return true if protocol >= CLIENT_GENERATION_PROTOCOL && source.custom_fields["client_edge_solve"].to_s == "true"
+      # Protocol 3 is strictly server-owned and generated on the server!
+      return false if protocol >= 3
       # Legacy protocol 2 client-edge solve only
       return false unless source.custom_fields["client_edge_solve"].to_s == "true" &&
                           source.custom_fields["mobile_answer_protocol"].to_i == 2
@@ -354,7 +367,8 @@ module SorumatikOcr
       }
       @metrics["upstream_sent_ms"] = elapsed
       raw = +""
-      last_publish = -100
+      last_publish = -PUBLISH_INTERVAL_MS
+      last_persist = 0
       last_heartbeat = -100
 
       GeminiAnswerStream.new(model: model, api_key: key, payload: payload, deadline: @deadline, metrics: @metrics).each_delta do |delta|
@@ -376,9 +390,13 @@ module SorumatikOcr
           last_heartbeat = elapsed
         end
 
-        if elapsed - last_publish >= 80
-          save_snapshot!(raw.strip)
+        # Viewers get frequent MessageBus updates; the row is written only
+        # every PERSIST_INTERVAL_MS so a busy server is not flooded with writes.
+        if elapsed - last_publish >= PUBLISH_INTERVAL_MS
+          persist = elapsed - last_persist >= PERSIST_INTERVAL_MS
+          save_snapshot!(raw.strip, persist: persist)
           last_publish = elapsed
+          last_persist = elapsed if persist
         end
       end
 
@@ -508,8 +526,9 @@ module SorumatikOcr
       ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - @started) * 1000).round
     end
 
-    def save_snapshot!(raw, state: "generating")
-      @generation.update!(raw: raw, state: state, metrics: @metrics, sequence: @generation.sequence + 1)
+    def save_snapshot!(raw, state: "generating", persist: true)
+      @generation.assign_attributes(raw: raw, state: state, metrics: @metrics, sequence: @generation.sequence + 1)
+      @generation.save! if persist
       @generation.publish!
     end
 

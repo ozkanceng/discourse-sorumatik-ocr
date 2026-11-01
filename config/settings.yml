@@ -64,6 +64,23 @@ plugins:
   gemini_ai_rate_limit_per_minute:
     default: 30
     client: false
+  sorumatik_client_generation_enabled:
+    default: true
+    client: false
+  sorumatik_client_heartbeat_timeout_seconds:
+    default: 60
+    min: 30
+    max: 300
+    client: false
+  sorumatik_mobile_gemini_api_key:
+    default: ""
+    secret: true
+    client: false
+  gemini_ai_proxy_max_concurrent_streams:
+    default: 6
+    min: 1
+    max: 200
+    client: false
   gemini_ai_allowed_models:
     default: "gemini-2.5-flash|gemini-2.5-flash-lite|gemini-2.0-flash|gemini-2.0-flash-lite|gemini-3-flash|gemini-3.1-flash-lite|gemini-3.5-flash-lite|gemini-3.6-flash|gemini-3.7-flash|gemini-3.8-flash"
     client: false

@@ -24,6 +24,10 @@ tr:
     sorumatik_ai_generation_streaming_enabled: "[Sorumatik OCR & AI] Canlı akış (streaming) yanıtlarını MessageBus ile göster"
     sorumatik_ai_generation_streaming_percent: "[Sorumatik OCR & AI] Canlı yapay zeka akışını alacak kullanıcı yüzdesi (0-100)"
     gemini_legacy_client_fallback: "[Sorumatik OCR & AI] Eski mobil istemcilere API anahtarı dönme desteği (Güvenlik için kapalı tutulmalıdır)"
+    sorumatik_client_generation_enabled: "[Sorumatik OCR & AI] Mobil uygulama yapay zeka cevabını Gemini ile cihazda üretip kaydeder (protokol 4). Kapatılırsa sunucu üretimine dönülür"
+    sorumatik_client_heartbeat_timeout_seconds: "[Sorumatik OCR & AI] Cihazdan sinyal gelmezse sunucunun cevabı devralmadan önce beklediği saniye"
+    sorumatik_mobile_gemini_api_key: "[Sorumatik OCR & AI] Cihazda cevap üretimi için giriş yapmış mobil kullanıcılara gönderilen isteğe bağlı Gemini anahtarı (Google Cloud'da uygulama paketlerine kısıtlayın). Boş = protokol 4 kapalı kalır, cevabı sunucu üretir"
+    gemini_ai_proxy_max_concurrent_streams: "[Sorumatik OCR & AI] Yapay zeka vekilinden aynı anda geçebilecek en fazla Gemini akışı (yaklaşık UNICORN_WORKERS sayısının yarısı)"
   sorumatik_ocr:
     api_key_missing: "Gemini OCR API anahtarı sunucuda tanımlı değil."
     image_missing: "İstekte görsel bulunamadı."

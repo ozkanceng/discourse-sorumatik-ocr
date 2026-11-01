@@ -53,11 +53,19 @@ module SorumatikOcr
 
       # Protocol 4: signed-in mobile apps generate answers on the device with
       # Gemini and only save the result, so the key goes to active users only.
-      client_generation = SiteSetting.respond_to?(:sorumatik_client_generation_enabled) &&
-                          SiteSetting.sorumatik_client_generation_enabled &&
-                          SecurityPolicy.active_user?(current_user)
+      client_generation_enabled = SiteSetting.respond_to?(:sorumatik_client_generation_enabled) &&
+                                  SiteSetting.sorumatik_client_generation_enabled
+      active_user = SecurityPolicy.active_user?(current_user)
+      client_generation = client_generation_enabled && active_user
       mobile_api_key = client_generation ? SorumatikOcr.resolve_mobile_api_key : ""
       client_generation &&= mobile_api_key.present?
+      # Why protocol 4 is off, for diagnosing settings. Never carries the key.
+      client_generation_blocked =
+        if client_generation then nil
+        elsif !client_generation_enabled then "setting_disabled"
+        elsif !active_user then "user_not_recognized"
+        else "mobile_key_empty"
+        end
 
       # SECURITY: Anahtar yalnızca protokol 4 için giriş yapmış aktif kullanıcıya gider.
       # İstemciler her zaman sunucu proxy (/sorumatik/ai/generate, /sorumatik/ocr) üzerinden çalışmalıdır.
@@ -67,6 +75,7 @@ module SorumatikOcr
         mobile_answer_protocol: client_generation ? AnswerGeneration::CLIENT_GENERATION_PROTOCOL : 3,
         server_generation: !client_generation,
         client_generation: !!client_generation,
+        client_generation_blocked: client_generation_blocked,
         client_heartbeat_seconds: 20,
         enabled: !!enabled,
         save_solution_enabled: true,

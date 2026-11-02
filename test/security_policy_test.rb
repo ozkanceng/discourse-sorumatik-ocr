@@ -142,7 +142,7 @@ class SecurityPolicyTest < Minitest::Test
 
   def test_custom_site_setting_allowlist_still_blocks_pro_tokens
     setting = Struct.new(:gemini_ai_allowed_models).new("gemini-2.5-flash|gemini-3.1-pro")
-    assert_equal "gemini-2.5-flash", Policy.resolve_text_model("gemini-3.1-pro", site_setting: setting)
+    assert_equal "gemini-3.1-flash-lite", Policy.resolve_text_model("gemini-3.1-pro", site_setting: setting)
     assert_equal "gemini-2.5-flash", Policy.resolve_text_model("gemini-3.8-flash", site_setting: setting, fallback: "gemini-2.5-flash")
   end
 

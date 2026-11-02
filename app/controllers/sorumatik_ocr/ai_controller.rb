@@ -64,7 +64,7 @@ module SorumatikOcr
         params[:model],
         site_setting: SiteSetting,
         setting_model: default_tools_model,
-        fallback: "gemini-2.5-flash"
+        fallback: "gemini-3.1-flash-lite"
       )
       media_parts = params[:media_parts] || params[:mediaParts] || []
       is_json = params[:is_json].to_s == "true" || params[:isJson].to_s == "true"
@@ -268,7 +268,7 @@ module SorumatikOcr
 
       api_key = resolve_api_key
       default_tools_model = SiteSetting.respond_to?(:gemini_ai_tools_model) ? SiteSetting.gemini_ai_tools_model.presence : nil
-      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: default_tools_model, fallback: "gemini-2.5-flash")
+      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: default_tools_model, fallback: "gemini-3.1-flash-lite")
 
       is_stream = params[:stream].to_s == "true" || request.headers["Accept"].to_s.include?("text/event-stream")
 
@@ -335,7 +335,7 @@ module SorumatikOcr
 
       api_key = resolve_api_key
       default_solve_model = SiteSetting.respond_to?(:gemini_ai_solve_model) ? SiteSetting.gemini_ai_solve_model.presence : nil
-      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: default_solve_model, fallback: "gemini-2.5-flash")
+      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: default_solve_model, fallback: "gemini-3.1-flash-lite")
 
       res = call_gemini_sync(model, api_key, payload)
       if res[:success]
@@ -394,7 +394,7 @@ module SorumatikOcr
 
       api_key = resolve_api_key
       default_tools_model = SiteSetting.respond_to?(:gemini_ai_tools_model) ? SiteSetting.gemini_ai_tools_model.presence : nil
-      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: default_tools_model, fallback: "gemini-2.5-flash")
+      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: default_tools_model, fallback: "gemini-3.1-flash-lite")
 
       res = call_gemini_sync(model, api_key, payload)
       if res[:success]

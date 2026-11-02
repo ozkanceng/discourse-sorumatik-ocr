@@ -142,7 +142,7 @@ module SorumatikOcr
          .uniq
     end
 
-    def resolve_text_model(requested, site_setting: nil, setting_model: nil, fallback: "gemini-2.5-flash")
+    def resolve_text_model(requested, site_setting: nil, setting_model: nil, fallback: "gemini-3.1-flash-lite")
       custom = configured_allowed_models(site_setting)
       allowed = custom.empty? ? DEFAULT_ALLOWED_TEXT_MODELS : custom
 
@@ -153,7 +153,7 @@ module SorumatikOcr
       return cfg if !cfg.empty? && !blocked_model_name?(cfg)
 
       fb = fallback.to_s.strip.downcase
-      !fb.empty? && !blocked_model_name?(fb) ? fb : "gemini-2.5-flash"
+      !fb.empty? && !blocked_model_name?(fb) ? fb : "gemini-3.1-flash-lite"
     end
 
     def resolve_ocr_model(requested, site_setting: nil, fallback: "gemini-2.5-flash-lite")

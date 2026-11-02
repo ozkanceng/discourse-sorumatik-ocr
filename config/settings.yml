@@ -20,7 +20,7 @@ plugins:
     default: true
     client: false
   gemini_ai_solve_model:
-    default: "gemini-2.5-flash"
+    default: "gemini-3.1-flash-lite"
     client: false
   gemini_ai_solve_bot_username:
     default: "sorumatik_ai"
@@ -48,10 +48,10 @@ plugins:
     default: true
     client: false
   gemini_ai_tools_model:
-    default: "gemini-2.5-flash"
+    default: "gemini-3.1-flash-lite"
     client: false
   gemini_document_quiz_model:
-    default: "gemini-2.5-flash"
+    default: "gemini-3.1-flash-lite"
     client: false
   sorumatik_ai_generation_streaming_enabled:
     default: true

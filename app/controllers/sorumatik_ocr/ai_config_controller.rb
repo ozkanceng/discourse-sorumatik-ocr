@@ -21,8 +21,8 @@ module SorumatikOcr
         Rails.logger.warn("[Sorumatik AI Config] RateLimiter notice: #{rl_err.message}")
       end
 
-      raw_tools_model = (SiteSetting.respond_to?(:gemini_ai_tools_model) && SiteSetting.gemini_ai_tools_model.presence) || "gemini-2.5-flash"
-      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: raw_tools_model, fallback: "gemini-2.5-flash")
+      raw_tools_model = (SiteSetting.respond_to?(:gemini_ai_tools_model) && SiteSetting.gemini_ai_tools_model.presence) || "gemini-3.1-flash-lite"
+      model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: raw_tools_model, fallback: "gemini-3.1-flash-lite")
       raw_solve_model = (SiteSetting.respond_to?(:gemini_ai_solve_model) && SiteSetting.gemini_ai_solve_model.presence) || model
       solve_model = SecurityPolicy.resolve_text_model(nil, site_setting: SiteSetting, setting_model: raw_solve_model, fallback: model)
       solve_system_prompt = (SiteSetting.respond_to?(:gemini_ai_solve_system_prompt) && SiteSetting.gemini_ai_solve_system_prompt.presence) || ""

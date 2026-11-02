@@ -331,7 +331,7 @@ module SorumatikOcr
         nil,
         site_setting: SiteSetting,
         setting_model: SiteSetting.gemini_ai_solve_model,
-        fallback: "gemini-2.5-flash"
+        fallback: "gemini-3.1-flash-lite"
       )
       prompt = SiteSetting.gemini_ai_solve_system_prompt
       @metrics.merge!("model" => model, "prompt_sha256" => Digest::SHA256.hexdigest(prompt))

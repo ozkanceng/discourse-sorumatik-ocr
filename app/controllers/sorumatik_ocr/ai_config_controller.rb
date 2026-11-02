@@ -92,7 +92,11 @@ module SorumatikOcr
         tts_model: tts_model,
         blackboard_model: blackboard_model,
         blackboard_thinking_level: blackboard_thinking_level,
-        api_key: client_generation ? mobile_api_key : ""
+        # Proxy request limits, so apps size prompts before sending instead of hitting 413.
+        max_prompt_chars: AiController::MAX_PROMPT_CHARS,
+        max_system_instruction_chars: AiController::MAX_SYSTEM_INSTRUCTION_CHARS,
+        max_tts_text_chars: AiController::MAX_TTS_TEXT_CHARS,
+        api_key:client_generation ? mobile_api_key : ""
       }
     rescue => err
       Rails.logger.error("[Sorumatik AI Config] Error: #{err.class}: #{err.message}")

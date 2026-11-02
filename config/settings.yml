@@ -65,7 +65,7 @@ plugins:
     default: 30
     client: false
   sorumatik_client_generation_enabled:
-    default: true
+    default: false
     client: false
   sorumatik_client_heartbeat_timeout_seconds:
     default: 60

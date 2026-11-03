@@ -92,6 +92,28 @@ plugins:
   sorumatik_blackboard_beta_usernames:
     default: ""
     client: false
+  sorumatik_answer_backend:
+    default: "gemini"
+    type: enum
+    choices:
+      - gemini
+      - api
+    client: false
+  sorumatik_answer_api_percent:
+    default: 100
+    min: 0
+    max: 100
+    client: false
+  sorumatik_api_base_url:
+    default: "http://172.17.0.1:8000"
+    client: false
+  sorumatik_api_service_token:
+    default: ""
+    secret: true
+    client: false
+  sorumatik_api_beta_usernames:
+    default: ""
+    client: false
   sorumatik_blackboard_engine_v5_percent:
     default: 0
     min: 0

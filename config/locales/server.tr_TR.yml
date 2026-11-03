@@ -2,6 +2,11 @@ tr_TR:
   site_settings:
     gemini_tts_require_login: "[Sorumatik OCR & AI] /sorumatik/ai/tts için giriş zorunlu olsun. Desteklenen hiçbir uygulama sürümü TTS'yi girişsiz çağırmıyorsa açın"
     sorumatik_blackboard_beta_usernames: "[Sorumatik Kara Tahta] Tüm Kara Tahta v5 bayraklarını alan kullanıcı adları, | ile ayrılmış (QA hesapları)"
+    sorumatik_answer_backend: "[Sorumatik OCR & AI] Forum cevaplarını kim üretir: gemini (doğrudan) veya api (api.sorumatik.co üzerinden; metin gelmeden hata olursa Gemini'ye düşer)"
+    sorumatik_answer_api_percent: "[Sorumatik OCR & AI] api seçiliyken cevabı API'den alan kullanıcı yüzdesi (0-100)"
+    sorumatik_api_base_url: "[Sorumatik OCR & AI] Sunucudaki Sorumatik API adresi (Docker köprüsü, Cloudflare'den geçmez)"
+    sorumatik_api_service_token: "[Sorumatik OCR & AI] Forumun Sorumatik API'ye gönderdiği belirteç (API'deki FORUM_SERVICE_TOKENS'tan biri). Boş = API kullanılmaz"
+    sorumatik_api_beta_usernames: "[Sorumatik OCR & AI] Her zaman Sorumatik API'yi kullanan kullanıcı adları (| ile ayrılmış), test için"
     sorumatik_blackboard_engine_v5_percent: "[Sorumatik Kara Tahta] Kademeli yayın: yeni oynatıcı (engine_v5) açık olan giriş yapmış kullanıcı yüzdesi, 0-100"
     sorumatik_blackboard_generation_v5_percent: "[Sorumatik Kara Tahta] Kademeli yayın: v5 çözüm üretimi (generation_v5) açık olan giriş yapmış kullanıcı yüzdesi, 0-100"
     sorumatik_blackboard_segment_tts_percent: "[Sorumatik Kara Tahta] Kademeli yayın: cümle bazlı seslendirme (segment_tts) açık olan giriş yapmış kullanıcı yüzdesi, 0-100"

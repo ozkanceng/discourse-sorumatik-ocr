@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "digest"
+require_relative "rollout_flags"
 
 module SorumatikOcr
   # Kara Tahta v5 feature flags for /sorumatik/ai-config (`blackboard_flags`).
@@ -23,12 +23,7 @@ module SorumatikOcr
     end
 
     def enabled?(key, user, site_setting)
-      percent = percent_for(key, site_setting)
-      return false if percent <= 0
-      return true if percent >= 100
-      return false unless user&.id
-
-      bucket(key, user.id) < percent
+      RolloutFlags.enabled?(key, user, percent: percent_for(key, site_setting))
     end
 
     def percent_for(key, site_setting)
@@ -39,15 +34,13 @@ module SorumatikOcr
     end
 
     def bucket(key, user_id)
-      Digest::SHA256.hexdigest("#{key}:#{user_id}")[0, 8].to_i(16) % 100
+      RolloutFlags.bucket(key, user_id)
     end
 
     def beta_user?(user, site_setting)
-      return false unless user&.respond_to?(:username) && user.username.present?
       return false unless site_setting.respond_to?(:sorumatik_blackboard_beta_usernames)
 
-      site_setting.sorumatik_blackboard_beta_usernames.to_s.split(/[|,]/).map(&:strip)
-        .reject(&:empty?).any? { |name| name.casecmp?(user.username.to_s) }
+      RolloutFlags.beta?(user, site_setting.sorumatik_blackboard_beta_usernames)
     end
   end
 end

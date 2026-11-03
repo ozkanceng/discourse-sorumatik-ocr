@@ -20,6 +20,14 @@ module SorumatikOcr
       @model, @api_key, @payload, @deadline, @metrics = model, api_key, payload, deadline, metrics
     end
 
+    def endpoint
+      URI("https://generativelanguage.googleapis.com/v1beta/models/#{@model}:streamGenerateContent?alt=sse")
+    end
+
+    def authorize(request)
+      request["x-goog-api-key"] = @api_key
+    end
+
     def remaining
       seconds = @deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
       raise Failure.new("generation_timeout") if seconds <= 0
@@ -33,12 +41,12 @@ module SorumatikOcr
         attempts += 1
         @metrics["provider_attempts"] = attempts
         finished = false
-        uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{@model}:streamGenerateContent?alt=sse")
+        uri = endpoint
         Timeout.timeout(remaining) do
-          Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: [10, remaining].min, read_timeout: remaining) do |http|
+          Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: [10, remaining].min, read_timeout: remaining) do |http|
             request = Net::HTTP::Post.new(uri.request_uri)
             request["Content-Type"] = "application/json"
-            request["x-goog-api-key"] = @api_key
+            authorize(request)
             request.body = JSON.generate(@payload)
             http.request(request) do |response|
               status = response.code.to_i

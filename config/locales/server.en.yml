@@ -2,6 +2,11 @@ en:
   site_settings:
     gemini_tts_require_login: "[Sorumatik OCR & AI] Require a signed-in user for /sorumatik/ai/tts. Turn on once no supported app build calls TTS anonymously"
     sorumatik_blackboard_beta_usernames: "[Sorumatik Kara Tahta] Pipe-separated usernames that get every Kara Tahta v5 flag (QA accounts)"
+    sorumatik_answer_backend: "[Sorumatik OCR & AI] Who generates forum answers: gemini (directly) or api (through api.sorumatik.co, falls back to Gemini before any text)"
+    sorumatik_answer_api_percent: "[Sorumatik OCR & AI] With backend api: share of users (0-100) whose answers go through the API"
+    sorumatik_api_base_url: "[Sorumatik OCR & AI] Sorumatik API address on the server (Docker bridge, not through Cloudflare)"
+    sorumatik_api_service_token: "[Sorumatik OCR & AI] Token the forum sends to the Sorumatik API (one of its FORUM_SERVICE_TOKENS). Empty = API not used"
+    sorumatik_api_beta_usernames: "[Sorumatik OCR & AI] Usernames (| separated) that always use the Sorumatik API, for QA"
     sorumatik_blackboard_engine_v5_percent: "[Sorumatik Kara Tahta] Rollout: percent of signed-in users with the new player (engine_v5), 0-100"
     sorumatik_blackboard_generation_v5_percent: "[Sorumatik Kara Tahta] Rollout: percent of signed-in users with the v5 solution generation (generation_v5), 0-100"
     sorumatik_blackboard_segment_tts_percent: "[Sorumatik Kara Tahta] Rollout: percent of signed-in users with the per-sentence narration (segment_tts), 0-100"

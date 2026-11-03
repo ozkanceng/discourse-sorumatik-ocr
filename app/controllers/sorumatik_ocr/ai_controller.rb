@@ -110,6 +110,14 @@ module SorumatikOcr
 
       if is_json
         generation_config[:responseMimeType] = "application/json"
+        begin
+          schema = ResponseSchema.sanitize(params[:response_schema] || params[:responseSchema])
+        rescue ResponseSchema::Invalid => e
+          return render_json_error("Geçersiz yanıt şeması: #{e.message}", status: 400)
+        end
+        # Structured output: Gemini then emits JSON that matches the schema,
+        # in the schema's key order (streamed chunks are partial JSON).
+        generation_config[:responseJsonSchema] = schema if schema
       end
 
       apply_thinking_config!(generation_config, model, thinking_level)
@@ -464,7 +472,11 @@ module SorumatikOcr
     end
 
     def ensure_tts_authorized!
-      unless SecurityPolicy.active_user?(current_user) || SecurityPolicy.valid_mobile_client?(request)
+      # Older app builds call TTS without a user key; once they are gone,
+      # gemini_tts_require_login closes the anonymous (client id only) path.
+      require_login = SiteSetting.respond_to?(:gemini_tts_require_login) && SiteSetting.gemini_tts_require_login
+      anonymous_ok = !require_login && SecurityPolicy.valid_mobile_client?(request)
+      unless SecurityPolicy.active_user?(current_user) || anonymous_ok
         render_json_error(I18n.t("sorumatik_ocr.auth_required", default: "Giriş yapmanız gerekmektedir"), status: 401)
         return false
       end

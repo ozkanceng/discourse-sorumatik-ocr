@@ -1,5 +1,13 @@
 tr:
   site_settings:
+    gemini_tts_require_login: "[Sorumatik OCR & AI] /sorumatik/ai/tts için giriş zorunlu olsun. Desteklenen hiçbir uygulama sürümü TTS'yi girişsiz çağırmıyorsa açın"
+    sorumatik_blackboard_beta_usernames: "[Sorumatik Kara Tahta] Tüm Kara Tahta v5 bayraklarını alan kullanıcı adları, | ile ayrılmış (QA hesapları)"
+    sorumatik_blackboard_engine_v5_percent: "[Sorumatik Kara Tahta] Kademeli yayın: yeni oynatıcı (engine_v5) açık olan giriş yapmış kullanıcı yüzdesi, 0-100"
+    sorumatik_blackboard_generation_v5_percent: "[Sorumatik Kara Tahta] Kademeli yayın: v5 çözüm üretimi (generation_v5) açık olan giriş yapmış kullanıcı yüzdesi, 0-100"
+    sorumatik_blackboard_segment_tts_percent: "[Sorumatik Kara Tahta] Kademeli yayın: cümle bazlı seslendirme (segment_tts) açık olan giriş yapmış kullanıcı yüzdesi, 0-100"
+    sorumatik_blackboard_export_v2_percent: "[Sorumatik Kara Tahta] Kademeli yayın: önce donanım video kodlayıcı (export_v2) açık olan giriş yapmış kullanıcı yüzdesi, 0-100"
+    sorumatik_blackboard_verify_answers_percent: "[Sorumatik Kara Tahta] Kademeli yayın: ikinci cevap kontrolü rozeti (verify_answers) açık olan giriş yapmış kullanıcı yüzdesi, 0-100"
+    sorumatik_blackboard_server_quota_percent: "[Sorumatik Kara Tahta] Kademeli yayın: sunucu tarafı günlük kota (server_quota) açık olan giriş yapmış kullanıcı yüzdesi, 0-100"
     gemini_ocr_enabled: "[Sorumatik OCR & AI] Eklentiyi ve OCR uç noktasını (/sorumatik/ocr) aktif et"
     gemini_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Gizli Anahtarı (Tüm OCR ve Yapay Zeka işlemleri için sunucu tarafında güvenle kullanılır)"
     sorumatik_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Anahtarı (gemini_ocr_api_key ile eşdeğer alternatif alan)"

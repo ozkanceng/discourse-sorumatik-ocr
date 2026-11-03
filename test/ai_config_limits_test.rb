@@ -69,6 +69,7 @@ end
 
 require_relative "../lib/sorumatik_ocr/security_policy"
 require_relative "../lib/sorumatik_ocr/answer_generation"
+require_relative "../lib/sorumatik_ocr/blackboard_flags"
 require_relative "../app/controllers/sorumatik_ocr/ai_controller"
 require_relative "../app/controllers/sorumatik_ocr/ai_config_controller"
 

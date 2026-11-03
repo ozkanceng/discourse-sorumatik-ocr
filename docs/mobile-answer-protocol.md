@@ -1,14 +1,11 @@
 # Mobil canlı cevap: protokol 4 (cihazda üretim)
 
-`sorumatik_client_generation_enabled` açıkken `GET /sorumatik/ai-config`, giriş
-yapmış aktif kullanıcıya `mobile_answer_protocol: 4`, `client_generation: true`,
-`server_generation: false`, `client_heartbeat_seconds: 20` ve Gemini anahtarını
-(`sorumatik_mobile_gemini_api_key`) döner. Bu ayar boşsa protokol 4 kapalıdır;
-sunucu anahtarı hiçbir zaman cihaza gönderilmez. Anahtar
-Google Cloud'da uygulama paketlerine kısıtlanmalıdır; uygulama
-`X-Android-Package` + `X-Android-Cert` (çalışma anında okunan imza SHA-1) veya
-`X-Ios-Bundle-Identifier` başlıklarını gönderir. Eski uygulamalar protokolü
-`>= 3` ile karşılaştırdığı için sunucu üretimiyle çalışmaya devam eder.
+> **Kapalı (2026-11-03).** Cihaza hiçbir Gemini anahtarı gönderilmez.
+> `GET /sorumatik/ai-config` her zaman `mobile_answer_protocol: 3`,
+> `client_generation: false`, `client_generation_blocked: "proxy_only"` ve boş
+> `api_key` döner; cevabı sunucu üretir. Aşağıdaki akış, eski sürümlerden
+> gelen protokol 4 kaynaklarının sunucuda nasıl kurtarıldığını anlatmak için
+> duruyor.
 
 Akış:
 

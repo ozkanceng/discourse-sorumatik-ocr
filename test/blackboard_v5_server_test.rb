@@ -59,8 +59,7 @@ end unless defined?(I18n)
 
 module SiteSetting
   class << self
-    attr_accessor :sorumatik_client_generation_enabled, :sorumatik_mobile_gemini_api_key,
-                  :gemini_ai_solve_bot_username, :gemini_tts_require_login,
+    attr_accessor :gemini_ai_solve_bot_username, :gemini_tts_require_login,
                   :sorumatik_blackboard_beta_usernames,
                   :sorumatik_blackboard_engine_v5_percent, :sorumatik_blackboard_generation_v5_percent,
                   :sorumatik_blackboard_segment_tts_percent, :sorumatik_blackboard_export_v2_percent,
@@ -70,9 +69,6 @@ end
 
 module SorumatikOcr
   PLUGIN_NAME = "discourse-sorumatik-ocr" unless const_defined?(:PLUGIN_NAME)
-  def self.resolve_mobile_api_key
-    SiteSetting.sorumatik_mobile_gemini_api_key.to_s.strip
-  end unless singleton_class.method_defined?(:resolve_mobile_api_key)
 end
 
 require_relative "../lib/sorumatik_ocr/security_policy"
@@ -90,8 +86,6 @@ class BlackboardV5ServerTest < Minitest::Test
   Flags = SorumatikOcr::BlackboardFlags
 
   def setup
-    SiteSetting.sorumatik_client_generation_enabled = false
-    SiteSetting.sorumatik_mobile_gemini_api_key = ""
     SiteSetting.gemini_ai_solve_bot_username = "sorumatik_ai"
     SiteSetting.gemini_tts_require_login = false
     SiteSetting.sorumatik_blackboard_beta_usernames = ""

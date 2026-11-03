@@ -51,20 +51,12 @@ end unless defined?(Rails)
 
 module SiteSetting
   class << self
-    attr_accessor :sorumatik_client_generation_enabled,
-                  :sorumatik_mobile_gemini_api_key,
-                  :gemini_ai_solve_bot_username
+    attr_accessor :gemini_ai_solve_bot_username
   end
 end unless defined?(SiteSetting)
 
 module SorumatikOcr
   PLUGIN_NAME = "discourse-sorumatik-ocr" unless const_defined?(:PLUGIN_NAME)
-
-  # Mirrors plugin.rb.
-  def self.resolve_mobile_api_key
-    key = SiteSetting.respond_to?(:sorumatik_mobile_gemini_api_key) && SiteSetting.sorumatik_mobile_gemini_api_key.presence
-    key.to_s.strip
-  end unless singleton_class.method_defined?(:resolve_mobile_api_key)
 end
 
 require_relative "../lib/sorumatik_ocr/security_policy"
@@ -93,8 +85,6 @@ class AiConfigLimitsTest < Minitest::Test
   end
 
   def setup
-    SiteSetting.sorumatik_client_generation_enabled = false
-    SiteSetting.sorumatik_mobile_gemini_api_key = ""
     SiteSetting.gemini_ai_solve_bot_username = "sorumatik_ai"
   end
 
@@ -127,30 +117,20 @@ class AiConfigLimitsTest < Minitest::Test
     assert_equal "", json[:api_key]
   end
 
-  def test_empty_mobile_key_keeps_server_generation
-    SiteSetting.sorumatik_client_generation_enabled = true
-    SiteSetting.sorumatik_mobile_gemini_api_key = ""
+  def test_signed_in_user_never_gets_a_key
     json = config_json
     assert_equal "", json[:api_key]
     assert_equal 3, json[:mobile_answer_protocol]
     assert_equal false, json[:client_generation]
     assert_equal true, json[:server_generation]
-    assert_equal "mobile_key_empty", json[:client_generation_blocked]
+    assert_equal "proxy_only", json[:client_generation_blocked]
   end
 
-  def test_disabled_setting_never_sends_key
-    SiteSetting.sorumatik_mobile_gemini_api_key = "configured-mobile-key"
-    json = config_json
-    assert_equal "", json[:api_key]
-    assert_equal 3, json[:mobile_answer_protocol]
-    assert_equal false, json[:client_generation]
-    assert_equal "setting_disabled", json[:client_generation_blocked]
-  end
-
-  def test_client_generation_defaults_off
+  def test_settings_have_no_device_key
     settings = YAML.load_file(File.expand_path("../config/settings.yml", __dir__))
-    setting = settings.values.map { |group| group["sorumatik_client_generation_enabled"] }.compact.first
-    refute_nil setting
-    assert_equal false, setting["default"]
+    names = settings.values.flat_map { |group| group.is_a?(Hash) ? group.keys : [] }
+    refute_includes names, "sorumatik_mobile_gemini_api_key"
+    refute_includes names, "gemini_legacy_client_fallback"
+    refute_includes names, "sorumatik_client_generation_enabled"
   end
 end

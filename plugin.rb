@@ -28,7 +28,8 @@ after_initialize do
   end
 
   # Permit only the ownership fields, never arbitrary post custom fields.
-  %w[client_edge_solve mobile_answer_protocol mobile_source is_mobile].each do |name|
+  # sorumatik_ai_backend=api marks questions from the new app, charged through the API.
+  %w[client_edge_solve mobile_answer_protocol mobile_source is_mobile sorumatik_ai_backend sorumatik_client_tier].each do |name|
     Post.plugin_permitted_create_params[name] = { type: :string, plugin: self }
   end
 

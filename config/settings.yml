@@ -114,6 +114,35 @@ plugins:
   sorumatik_api_beta_usernames:
     default: ""
     client: false
+  sorumatik_app_api_features:
+    default: ""
+    type: list
+    choices:
+      - tools
+      - ocr
+      - tts
+      - blackboard
+      - qa_client
+    client: false
+  sorumatik_app_api_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false
+  sorumatik_app_quota_authority:
+    default: "device"
+    type: enum
+    choices:
+      - device
+      - server
+    client: false
+  sorumatik_app_api_base_url:
+    default: "https://api.sorumatik.co"
+    client: false
+  sorumatik_api_min_app_build:
+    default: 0
+    min: 0
+    client: false
   sorumatik_blackboard_engine_v5_percent:
     default: 0
     min: 0

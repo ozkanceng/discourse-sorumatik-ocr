@@ -315,4 +315,20 @@ class ServerAnswerLifecycleTest < Minitest::Test
     assert_equal %i[gemini], used
     assert_equal "gemini", gen.metrics["backend"]
   end
+
+  def test_quota_exceeded_is_final_and_never_goes_to_gemini
+    gen = queued_generation
+    used = []
+    api = ->(**) { used << :api; FakeStream.new([], SorumatikOcr::GeminiAnswerStream::Failure.new("quota_exceeded")) }
+    direct = ->(**) { used << :gemini; FakeStream.new(["free answer"], nil) }
+    with_api_backend do
+      SorumatikOcr::ApiAnswerStream.stub(:new, api) do
+        SorumatikOcr::GeminiAnswerStream.stub(:new, direct) { SorumatikOcr::AnswerGeneration.new(gen).run! }
+      end
+    end
+    assert_equal %i[api], used
+    assert_equal "failed", gen.state
+    assert_equal "quota_exceeded", gen.error[:code]
+    assert_empty Jobs.enqueued
+  end
 end

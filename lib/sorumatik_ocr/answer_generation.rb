@@ -406,13 +406,16 @@ module SorumatikOcr
       direct = -> { GeminiAnswerStream.new(model: model, api_key: key, payload: payload, deadline: @deadline, metrics: @metrics) }
       if via_api
         begin
+          charge = AnswerBackend.charge_for(source)
+          @metrics["charge_feature"] = charge[:feature] if charge
           ApiAnswerStream.new(model: model, payload: payload, deadline: @deadline, metrics: @metrics,
                               user_id: source.user_id, request_id: @generation.generation_id,
                               service_token: SiteSetting.sorumatik_api_service_token,
-                              base_url: AnswerBackend.base_url).each_delta(&on_delta)
+                              base_url: AnswerBackend.base_url, charge: charge).each_delta(&on_delta)
         rescue GeminiAnswerStream::Failure => e
           # Before any text, Gemini itself is tried once; after text, the usual retry path applies.
-          raise unless raw.empty? && e.code != "generation_timeout" && !key.to_s.strip.empty?
+          # Out of energy is final: going to Gemini directly would hand out a free answer.
+          raise unless raw.empty? && !%w[generation_timeout quota_exceeded].include?(e.code) && !key.to_s.strip.empty?
           @metrics["api_fallback"] = e.code
           Rails.logger.warn("sorumatik_ai api stream failed before output generation_id=#{@generation.generation_id} code=#{e.code}; using Gemini")
           direct.call.each_delta(&on_delta)
@@ -443,7 +446,7 @@ module SorumatikOcr
       @generation.reload
       unless @generation.terminal?
         current_attempts = @generation.respond_to?(:attempts) ? @generation.attempts.to_i : 1
-        is_transient = (e.respond_to?(:retryable) && e.retryable) ||
+        is_transient = code.to_s != "quota_exceeded" && (e.respond_to?(:retryable) && e.retryable) ||
                        %w[provider_429 provider_500 provider_502 provider_503 provider_504 upstream_429 upstream_503 provider_connection_failed].include?(code.to_s)
         
         if is_transient && current_attempts < MAX_GENERATION_ATTEMPTS
@@ -458,12 +461,13 @@ module SorumatikOcr
         else
           stripped_raw = raw ? raw.strip : ""
           final_raw = stripped_raw.empty? ? @generation.raw : stripped_raw
+          message = code.to_s == "quota_exceeded" ? "Beyin enerjin bitti. Enerji dolunca ya da PRO ile devam edebilirsin." : "Yanıt tamamlanamadı."
           @generation.update!(
             state: "failed",
             sequence: @generation.sequence + 1,
             raw: final_raw,
             metrics: @metrics || {},
-            error: { code: code, message: "Yanıt tamamlanamadı.", retryable: false }
+            error: { code: code, message: message, retryable: false }
           )
           @generation.publish!
         end

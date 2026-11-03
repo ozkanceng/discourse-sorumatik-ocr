@@ -84,3 +84,74 @@ class ApiAnswerStreamTest < Minitest::Test
     assert_equal "http://172.17.0.1:8000", SorumatikOcr::AnswerBackend.base_url(site_setting: Settings.new(on))
   end
 end
+
+class ApiChargeAndBackendTest < Minitest::Test
+  Response = ApiAnswerStreamTest::Response
+  Settings = ApiAnswerStreamTest::Settings
+  User = ApiAnswerStreamTest::User
+  Req = Struct.new(:headers)
+  Post = Struct.new(:id, :post_number, :topic, :custom_fields)
+  Topic = Struct.new(:first_post)
+
+  def stream(charge: nil)
+    SorumatikOcr::ApiAnswerStream.new(model: "gemini-3.1-flash-lite", payload: {}, metrics: {},
+      deadline: Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5, user_id: 9, request_id: "g",
+      service_token: "t", base_url: "http://api", charge: charge)
+  end
+
+  def call(stream, responses)
+    calls = []
+    transport = Object.new
+    transport.define_singleton_method(:request) { |r, &block| calls << r; block.call(responses.shift) }
+    stream.define_singleton_method(:sleep) { |_| }
+    Net::HTTP.stub(:start, ->(*_a, **_o, &block) { block.call(transport) }) { stream.each_delta { |_| } }
+    calls
+  end
+
+  def test_quota_exceeded_is_final_and_not_retried
+    body = JSON.generate(error: { code: 429, message: "quota_exceeded" })
+    responses = [Response.new("429", [body])]
+    error = assert_raises(SorumatikOcr::GeminiAnswerStream::Failure) { call(stream, responses) }
+    assert_equal "quota_exceeded", error.code
+    refute error.retryable
+  end
+
+  def test_charge_headers
+    reply = Response.new("200", ["data: #{JSON.generate(candidates: [{ content: { parts: [{ text: "x" }] }, finishReason: "STOP" }])}\n\n"])
+    calls = call(stream(charge: { feature: "ask_question", key: "qa:post:5", tier: "premium" }), [reply])
+    assert_equal "ask_question", calls.first["X-Sorumatik-Charge-Feature"]
+    assert_equal "qa:post:5", calls.first["X-Sorumatik-Charge-Key"]
+    assert_equal "premium", calls.first["X-Sorumatik-Tier"]
+  end
+
+  def test_only_app_topics_are_charged
+    first = Post.new(5, 1, nil, { "sorumatik_ai_backend" => "api" })
+    first.topic = Topic.new(first)
+    assert_equal({ feature: "ask_question", key: "qa:post:5", tier: nil }, SorumatikOcr::AnswerBackend.charge_for(first))
+    reply = Post.new(6, 3, Topic.new(first), {})
+    assert_equal "follow_up", SorumatikOcr::AnswerBackend.charge_for(reply)[:feature]
+    web = Post.new(7, 1, nil, {})
+    web.topic = Topic.new(web)
+    assert_nil SorumatikOcr::AnswerBackend.charge_for(web)
+  end
+
+  def test_app_backend_block_and_build_gate
+    on = { sorumatik_app_api_features: "tools|ocr", sorumatik_app_api_percent: 100, sorumatik_api_beta_usernames: "",
+           sorumatik_app_quota_authority: "server", sorumatik_app_api_base_url: "https://api.sorumatik.co",
+           sorumatik_api_min_app_build: 0 }
+    block = SorumatikOcr::AppBackend.for_user(User.new(3, "a"), site_setting: Settings.new(on))
+    assert_equal "api", block[:features]["tools"]
+    assert_equal "forum", block[:features]["tts"]
+    assert_equal "server", block[:quota_authority]
+    anonymous = SorumatikOcr::AppBackend.for_user(nil, site_setting: Settings.new(on))
+    assert_equal "forum", anonymous[:features]["tools"]
+    assert_equal "device", anonymous[:quota_authority]
+    off = SorumatikOcr::AppBackend.for_user(User.new(3, "a"), site_setting: Settings.new(on.merge(sorumatik_app_api_percent: 0)))
+    assert_equal "forum", off[:features]["ocr"]
+    gate = Settings.new(on.merge(sorumatik_api_min_app_build: 120))
+    refute SorumatikOcr::AppBackend.proxy_closed_for?(Req.new({ "X-Sorumatik-App-Build" => "119" }), site_setting: gate)
+    assert SorumatikOcr::AppBackend.proxy_closed_for?(Req.new({ "X-Sorumatik-App-Build" => "120" }), site_setting: gate)
+    refute SorumatikOcr::AppBackend.proxy_closed_for?(Req.new({}), site_setting: gate)
+    refute SorumatikOcr::AppBackend.proxy_closed_for?(Req.new({ "X-Sorumatik-App-Build" => "999" }), site_setting: Settings.new(on))
+  end
+end

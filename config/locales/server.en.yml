@@ -1,5 +1,13 @@
 en:
   site_settings:
+    gemini_tts_require_login: "[Sorumatik OCR & AI] Require a signed-in user for /sorumatik/ai/tts. Turn on once no supported app build calls TTS anonymously"
+    sorumatik_blackboard_beta_usernames: "[Sorumatik Kara Tahta] Pipe-separated usernames that get every Kara Tahta v5 flag (QA accounts)"
+    sorumatik_blackboard_engine_v5_percent: "[Sorumatik Kara Tahta] Rollout: percent of signed-in users with the new player (engine_v5), 0-100"
+    sorumatik_blackboard_generation_v5_percent: "[Sorumatik Kara Tahta] Rollout: percent of signed-in users with the v5 solution generation (generation_v5), 0-100"
+    sorumatik_blackboard_segment_tts_percent: "[Sorumatik Kara Tahta] Rollout: percent of signed-in users with the per-sentence narration (segment_tts), 0-100"
+    sorumatik_blackboard_export_v2_percent: "[Sorumatik Kara Tahta] Rollout: percent of signed-in users with the hardware video encoder first (export_v2), 0-100"
+    sorumatik_blackboard_verify_answers_percent: "[Sorumatik Kara Tahta] Rollout: percent of signed-in users with the second answer check badge (verify_answers), 0-100"
+    sorumatik_blackboard_server_quota_percent: "[Sorumatik Kara Tahta] Rollout: percent of signed-in users with the server-side daily quota (server_quota), 0-100"
     gemini_ocr_enabled: "[Sorumatik OCR & AI] Enable plugin and OCR endpoint (/sorumatik/ocr)"
     gemini_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Secret Key (securely used server-side for OCR and AI operations)"
     sorumatik_ocr_api_key: "[Sorumatik OCR & AI] Google Gemini API Key (alternative alias for gemini_ocr_api_key)"

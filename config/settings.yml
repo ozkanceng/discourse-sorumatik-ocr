@@ -96,3 +96,39 @@ plugins:
   gemini_blackboard_thinking_level:
     default: "low"
     client: false
+  gemini_tts_require_login:
+    default: false
+    client: false
+  sorumatik_blackboard_beta_usernames:
+    default: ""
+    client: false
+  sorumatik_blackboard_engine_v5_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false
+  sorumatik_blackboard_generation_v5_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false
+  sorumatik_blackboard_segment_tts_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false
+  sorumatik_blackboard_export_v2_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false
+  sorumatik_blackboard_verify_answers_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false
+  sorumatik_blackboard_server_quota_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false

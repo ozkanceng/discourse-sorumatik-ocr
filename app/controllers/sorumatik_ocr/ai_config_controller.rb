@@ -92,6 +92,8 @@ module SorumatikOcr
         tts_model: tts_model,
         blackboard_model: blackboard_model,
         blackboard_thinking_level: blackboard_thinking_level,
+        # Kara Tahta v5 rollout; missing keys mean off on the client.
+        blackboard_flags: BlackboardFlags.for_user(current_user),
         # Proxy request limits, so apps size prompts before sending instead of hitting 413.
         max_prompt_chars: AiController::MAX_PROMPT_CHARS,
         max_system_instruction_chars: AiController::MAX_SYSTEM_INSTRUCTION_CHARS,

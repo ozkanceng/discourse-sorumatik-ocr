@@ -104,6 +104,8 @@ after_initialize do
 
   require_relative "lib/sorumatik_ocr/security_policy"
   require_relative "lib/sorumatik_ocr/proxy_capacity"
+  require_relative "lib/sorumatik_ocr/blackboard_flags"
+  require_relative "lib/sorumatik_ocr/response_schema"
   require_relative "app/controllers/sorumatik_ocr/ocr_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_solve_controller"
   require_relative "app/controllers/sorumatik_ocr/ai_config_controller"

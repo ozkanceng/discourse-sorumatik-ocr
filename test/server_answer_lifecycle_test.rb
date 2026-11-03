@@ -69,6 +69,7 @@ class Post
 end
 
 require_relative "../lib/sorumatik_ocr/gemini_answer_stream"
+require_relative "../lib/sorumatik_ocr/api_answer_stream"
 require_relative "../lib/sorumatik_ocr/answer_generation"
 
 class ServerAnswerLifecycleTest < Minitest::Test
@@ -246,5 +247,72 @@ class ServerAnswerLifecycleTest < Minitest::Test
 
     assert_equal "failed", gen.state
     assert_equal "max_attempts_exceeded", gen.error[:code]
+  end
+
+  class FakeStream
+    def initialize(deltas, error); @deltas, @error = deltas, error; end
+    def each_delta
+      @deltas.each { |delta| yield delta }
+      raise @error if @error
+    end
+  end
+
+  def with_api_backend
+    {
+      sorumatik_answer_backend: "api", sorumatik_api_service_token: "tok", sorumatik_answer_api_percent: 100,
+      sorumatik_api_beta_usernames: "", sorumatik_api_base_url: "http://172.17.0.1:8000"
+    }.each { |name, value| SiteSetting.define_singleton_method(name) { value } }
+    yield
+  ensure
+    %i[sorumatik_answer_backend sorumatik_api_service_token sorumatik_answer_api_percent
+       sorumatik_api_beta_usernames sorumatik_api_base_url].each { |name| SiteSetting.singleton_class.send(:remove_method, name) }
+  end
+
+  def queued_generation
+    FakeGeneration.new(
+      1, "gen-uuid", 100, 10, 1, nil, "queued", 0, "", {}, nil, 0, nil, nil, nil, false, 0, Time.now, Time.now,
+      FakeSource.new(10, 100, 1, 1, 1, nil, FakeUser.new(1, "alice"), FakeTopic.new(100, nil, {}, []), "Q", {}, Time.now)
+    )
+  end
+
+  def test_api_failure_before_text_falls_back_to_gemini_once
+    gen = queued_generation
+    used = []
+    api = ->(**) { used << :api; FakeStream.new([], SorumatikOcr::GeminiAnswerStream::Failure.new("provider_503", retryable: true)) }
+    direct = ->(**) { used << :gemini; FakeStream.new([], SorumatikOcr::GeminiAnswerStream::Failure.new("provider_503", retryable: true)) }
+    with_api_backend do
+      SorumatikOcr::ApiAnswerStream.stub(:new, api) do
+        SorumatikOcr::GeminiAnswerStream.stub(:new, direct) { SorumatikOcr::AnswerGeneration.new(gen).run! }
+      end
+    end
+    assert_equal %i[api gemini], used
+    assert_equal "api", gen.metrics["backend"]
+    assert_equal "provider_503", gen.metrics["api_fallback"]
+    assert_equal "queued", gen.state  # Both failed transiently: the normal retry path.
+  end
+
+  def test_api_failure_after_text_does_not_switch_provider
+    gen = queued_generation
+    used = []
+    api = ->(**) { used << :api; FakeStream.new(["Kısmi "], SorumatikOcr::GeminiAnswerStream::Failure.new("provider_connection_failed")) }
+    direct = ->(**) { used << :gemini; FakeStream.new(["x"], nil) }
+    with_api_backend do
+      SorumatikOcr::ApiAnswerStream.stub(:new, api) do
+        SorumatikOcr::GeminiAnswerStream.stub(:new, direct) { SorumatikOcr::AnswerGeneration.new(gen).run! }
+      end
+    end
+    assert_equal %i[api], used
+    refute gen.metrics.key?("api_fallback")
+  end
+
+  def test_gemini_backend_never_calls_the_api
+    gen = queued_generation
+    used = []
+    direct = ->(**) { used << :gemini; FakeStream.new([], SorumatikOcr::GeminiAnswerStream::Failure.new("provider_503", retryable: true)) }
+    SorumatikOcr::ApiAnswerStream.stub(:new, ->(**) { used << :api; raise "must not be used" }) do
+      SorumatikOcr::GeminiAnswerStream.stub(:new, direct) { SorumatikOcr::AnswerGeneration.new(gen).run! }
+    end
+    assert_equal %i[gemini], used
+    assert_equal "gemini", gen.metrics["backend"]
   end
 end

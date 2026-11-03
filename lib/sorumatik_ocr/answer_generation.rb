@@ -4,6 +4,7 @@ require "base64"
 require "digest"
 require "securerandom"
 require_relative "security_policy"
+require_relative "rollout_flags"
 
 module SorumatikOcr
   class AnswerGeneration
@@ -326,7 +327,9 @@ module SorumatikOcr
       is_fallback = @generation.metrics&.[]("fallback") == true
       raise GeminiAnswerStream::Failure.new("client_owned_source") if !is_fallback && self.class.client_owned_source?(source)
       key = SorumatikOcr.resolve_api_key
-      raise GeminiAnswerStream::Failure.new("missing_api_key") if key.to_s.strip.empty?
+      via_api = AnswerBackend.api_for?(source.user)
+      raise GeminiAnswerStream::Failure.new("missing_api_key") if key.to_s.strip.empty? && !via_api
+      @metrics["backend"] = via_api ? "api" : "gemini"
       model = SecurityPolicy.resolve_text_model(
         nil,
         site_setting: SiteSetting,
@@ -371,7 +374,7 @@ module SorumatikOcr
       last_persist = 0
       last_heartbeat = -100
 
-      GeminiAnswerStream.new(model: model, api_key: key, payload: payload, deadline: @deadline, metrics: @metrics).each_delta do |delta|
+      on_delta = lambda do |delta|
         @metrics["first_text_ms"] ||= elapsed
         raw << delta
 
@@ -398,6 +401,24 @@ module SorumatikOcr
           last_publish = elapsed
           last_persist = elapsed if persist
         end
+      end
+
+      direct = -> { GeminiAnswerStream.new(model: model, api_key: key, payload: payload, deadline: @deadline, metrics: @metrics) }
+      if via_api
+        begin
+          ApiAnswerStream.new(model: model, payload: payload, deadline: @deadline, metrics: @metrics,
+                              user_id: source.user_id, request_id: @generation.generation_id,
+                              service_token: SiteSetting.sorumatik_api_service_token,
+                              base_url: AnswerBackend.base_url).each_delta(&on_delta)
+        rescue GeminiAnswerStream::Failure => e
+          # Before any text, Gemini itself is tried once; after text, the usual retry path applies.
+          raise unless raw.empty? && e.code != "generation_timeout" && !key.to_s.strip.empty?
+          @metrics["api_fallback"] = e.code
+          Rails.logger.warn("sorumatik_ai api stream failed before output generation_id=#{@generation.generation_id} code=#{e.code}; using Gemini")
+          direct.call.each_delta(&on_delta)
+        end
+      else
+        direct.call.each_delta(&on_delta)
       end
 
       @metrics["last_text_ms"] = elapsed

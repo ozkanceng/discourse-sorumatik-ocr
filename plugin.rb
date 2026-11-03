@@ -96,6 +96,7 @@ after_initialize do
 
   require_relative "lib/sorumatik_ocr/security_policy"
   require_relative "lib/sorumatik_ocr/proxy_capacity"
+  require_relative "lib/sorumatik_ocr/rollout_flags"
   require_relative "lib/sorumatik_ocr/blackboard_flags"
   require_relative "lib/sorumatik_ocr/response_schema"
   require_relative "app/controllers/sorumatik_ocr/ocr_controller"
@@ -104,6 +105,7 @@ after_initialize do
   require_relative "app/controllers/sorumatik_ocr/ai_controller"
   require_relative "app/models/sorumatik_ocr/ai_generation"
   require_relative "lib/sorumatik_ocr/gemini_answer_stream"
+  require_relative "lib/sorumatik_ocr/api_answer_stream"
   require_relative "lib/sorumatik_ocr/answer_generation"
   require_relative "app/controllers/sorumatik_ocr/ai_generations_controller"
   require_relative "app/controllers/sorumatik_ocr/study_rooms_controller"

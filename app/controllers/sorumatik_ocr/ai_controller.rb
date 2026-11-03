@@ -46,6 +46,7 @@ module SorumatikOcr
     # POST /sorumatik/ai/generate
     def generate
       ensure_authenticated_user! || return
+      ensure_proxy_open! || return
       ensure_plugin_and_key! || return
       enforce_rate_limit! || return
 
@@ -153,6 +154,7 @@ module SorumatikOcr
     # POST /sorumatik/ai/tts
     def tts
       ensure_tts_authorized! || return
+      ensure_proxy_open! || return
       ensure_plugin_and_key! || return
       enforce_tts_rate_limit! || return
 
@@ -461,6 +463,14 @@ module SorumatikOcr
         normalized << { role: role, parts: cleaned }
       end
       normalized
+    end
+
+    # Faz 6: new app builds must use api.sorumatik.co; older ones keep the proxy.
+    def ensure_proxy_open!
+      return true unless AppBackend.proxy_closed_for?(request)
+
+      render json: { success: false, error: "use_api", api_base_url: AnswerBackend.base_url }, status: 409
+      false
     end
 
     def ensure_authenticated_user!

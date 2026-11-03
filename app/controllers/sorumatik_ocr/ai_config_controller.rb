@@ -77,6 +77,8 @@ module SorumatikOcr
         tts_model: tts_model,
         blackboard_model: blackboard_model,
         blackboard_thinking_level: blackboard_thinking_level,
+        # Which AI features this user's app sends to api.sorumatik.co (forum proxy stays the fallback).
+        ai_backend: AppBackend.for_user(current_user),
         # Kara Tahta v5 rollout; missing keys mean off on the client.
         blackboard_flags: BlackboardFlags.for_user(current_user),
         # Proxy request limits, so apps size prompts before sending instead of hitting 413.

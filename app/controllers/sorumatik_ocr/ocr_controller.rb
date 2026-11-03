@@ -53,6 +53,9 @@ module SorumatikOcr
     def extract
       # 1. Authorization: active user session OR valid mobile client header (never unverified User-Api-Key)
       return unless ensure_authorized!
+      if AppBackend.proxy_closed_for?(request)
+        return render json: { success: false, error: "use_api" }, status: 409
+      end
 
       # 2. Check if plugin is enabled
       unless SiteSetting.gemini_ocr_enabled

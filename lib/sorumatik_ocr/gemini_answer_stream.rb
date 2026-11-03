@@ -28,6 +28,11 @@ module SorumatikOcr
       request["x-goog-api-key"] = @api_key
     end
 
+    def failure_for(status, response)
+      Failure.new("provider_#{status}", retryable: status == 429 || status >= 500,
+                  retry_after: response["retry-after"]&.to_i)
+    end
+
     def remaining
       seconds = @deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
       raise Failure.new("generation_timeout") if seconds <= 0
@@ -51,10 +56,7 @@ module SorumatikOcr
             http.request(request) do |response|
               status = response.code.to_i
               @metrics["provider_status"] = status
-              unless status == 200
-                raise Failure.new("provider_#{status}", retryable: status == 429 || status >= 500,
-                                  retry_after: response["retry-after"]&.to_i)
-              end
+              raise failure_for(status, response) unless status == 200
               parser = Frames.new
               consume = proc do |data|
                 remaining

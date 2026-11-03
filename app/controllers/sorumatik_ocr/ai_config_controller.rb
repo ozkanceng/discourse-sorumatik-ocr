@@ -51,31 +51,16 @@ module SorumatikOcr
         bot_avatar_url = "#{Discourse.base_url}#{bot_avatar_url}" if bot_avatar_url.start_with?("/")
       end
 
-      # Protocol 4: signed-in mobile apps generate answers on the device with
-      # Gemini and only save the result, so the key goes to active users only.
-      client_generation_enabled = SiteSetting.respond_to?(:sorumatik_client_generation_enabled) &&
-                                  SiteSetting.sorumatik_client_generation_enabled
-      active_user = SecurityPolicy.active_user?(current_user)
-      client_generation = client_generation_enabled && active_user
-      mobile_api_key = client_generation ? SorumatikOcr.resolve_mobile_api_key : ""
-      client_generation &&= mobile_api_key.present?
-      # Why protocol 4 is off, for diagnosing settings. Never carries the key.
-      client_generation_blocked =
-        if client_generation then nil
-        elsif !client_generation_enabled then "setting_disabled"
-        elsif !active_user then "user_not_recognized"
-        else "mobile_key_empty"
-        end
-
-      # SECURITY: Anahtar yalnızca protokol 4 için giriş yapmış aktif kullanıcıya gider.
-      # İstemciler her zaman sunucu proxy (/sorumatik/ai/generate, /sorumatik/ocr) üzerinden çalışmalıdır.
+      # No Gemini key ever goes to a device, so protocol 4 (on-device
+      # answers) stays off and the server generates every answer. Old apps
+      # that read api_key get "" and fall back to protocol 3.
       render json: {
         success: true,
         # Older apps compare the protocol with >= 3 and keep server generation.
-        mobile_answer_protocol: client_generation ? AnswerGeneration::CLIENT_GENERATION_PROTOCOL : 3,
-        server_generation: !client_generation,
-        client_generation: !!client_generation,
-        client_generation_blocked: client_generation_blocked,
+        mobile_answer_protocol: 3,
+        server_generation: true,
+        client_generation: false,
+        client_generation_blocked: "proxy_only",
         client_heartbeat_seconds: 20,
         enabled: !!enabled,
         save_solution_enabled: true,
@@ -98,7 +83,7 @@ module SorumatikOcr
         max_prompt_chars: AiController::MAX_PROMPT_CHARS,
         max_system_instruction_chars: AiController::MAX_SYSTEM_INSTRUCTION_CHARS,
         max_tts_text_chars: AiController::MAX_TTS_TEXT_CHARS,
-        api_key:client_generation ? mobile_api_key : ""
+        api_key: ""
       }
     rescue => err
       Rails.logger.error("[Sorumatik AI Config] Error: #{err.class}: #{err.message}")
@@ -237,12 +222,6 @@ module SorumatikOcr
       render_json_error(I18n.t("sorumatik_ocr.rate_limited", default: "Çok fazla istek gönderildi. Lütfen biraz bekleyin."), status: 429)
     rescue GeminiAnswerStream::Failure => e
       return render json: { success: false, error: e.code }, status: 409
-    end
-
-    private
-
-    def resolve_api_key
-      SorumatikOcr.resolve_api_key
     end
   end
 end

@@ -99,21 +99,21 @@ class AiConfigLimitsTest < Minitest::Test
   end
 
   def test_proxy_limits
-    assert_equal 60_000, SorumatikOcr::AiController::MAX_PROMPT_CHARS
+    assert_equal 100_000, SorumatikOcr::AiController::MAX_PROMPT_CHARS
     assert_equal 10_000, SorumatikOcr::AiController::MAX_SYSTEM_INSTRUCTION_CHARS
     assert_equal 2_500, SorumatikOcr::AiController::MAX_TTS_TEXT_CHARS
   end
 
   def test_config_exposes_proxy_limits
     json = config_json
-    assert_equal 60_000, json[:max_prompt_chars]
+    assert_equal 100_000, json[:max_prompt_chars]
     assert_equal 10_000, json[:max_system_instruction_chars]
     assert_equal 2_500, json[:max_tts_text_chars]
   end
 
   def test_config_exposes_limits_to_anonymous_requests
     json = config_json(user: nil)
-    assert_equal 60_000, json[:max_prompt_chars]
+    assert_equal 100_000, json[:max_prompt_chars]
     assert_equal "", json[:api_key]
   end
 

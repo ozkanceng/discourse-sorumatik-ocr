@@ -80,19 +80,7 @@ after_initialize do
     Rails.logger.warn("[Sorumatik OCR] Failed to prepend CurrentUserProviderBypass: #{e.message}")
   end
 
-  module ::SorumatikOcr::MobileSourceFields
-    def setup_post
-      super
-      proto = @opts[:mobile_answer_protocol].to_i
-      if proto >= 2 || @opts[:client_edge_solve].to_s == "true"
-        @post.custom_fields["client_edge_solve"] = @opts[:client_edge_solve].to_s
-        @post.custom_fields["mobile_answer_protocol"] = proto > 0 ? proto.to_s : "2"
-      end
-      if @opts[:mobile_source].to_s == "true"
-        @post.custom_fields["mobile_source"] = "true"
-      end
-    end
-  end
+  require_relative "lib/sorumatik_ocr/mobile_source_fields"
   PostCreator.prepend(SorumatikOcr::MobileSourceFields)
 
   require_relative "lib/sorumatik_ocr/security_policy"
